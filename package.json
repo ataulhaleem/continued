@@ -3,6 +3,11 @@
   "displayName": "continued",
   "description": "drop in replacement for continue.dev",
   "version": "0.0.1",
+  "publisher": "AtaUlHaleem",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ataulhaleem/continued.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -31,7 +36,13 @@
           "name": "Chat"
         }
       ]
-    }
+    },
+    "commands": [
+      {
+        "command": "continued.addProvider",
+        "title": "Continued: Add Cloud Provider"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

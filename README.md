@@ -1,72 +1,55 @@
-# BlaBlaChatAgent README
+# Continued
 
-This is the README for your extension "BlaBlaChatAgent". After writing up a brief description, we recommend including the following sections.
-
-## Features
-
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
-
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
-
-## Requirements
-
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
-
-## Extension Settings
-
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
+**Continued** is an elite AI coding assistant built directly into your VS Code sidebar. It orchestrates a seamless multi-model experience by combining local offline LLMs with advanced cloud providers to assist you with conversational chat, file creation, and precise repository modifications.
 
 ---
 
-## Following extension guidelines
+## Features
 
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
+* **Dual-Engine Model Hub:** Access local Ollama instances (e.g., `llama3`) alongside remote high-performance cloud clusters via the **Blablador** API (such as `alias-code` or `alias-large`).
+* **Agent Operations (File Auto-Editing & Deletion):** Shift your chat panel into **Agent Mode** or **Agent Auto-Edit** to empower the AI to dynamically generate file contents using `<write_file>` tags or clean up workspace paths with `<delete_file />` tags.
+* **Safe Approval Gateway:** Maintain absolute control over your filesystem. In standard Agent Mode, every change or file destruction requires an explicit confirmation click in your sidebar before executing.
+* **Transaction Rollbacks / Undo:** Did the model write an unwanted change? Use the built-in **Discard / Undo** loop to cleanly roll back the targeted file to its original snapshot instantly.
+* **Secure Credential Allocation:** Cloud provider endpoint tokens are safely managed inside VS Code's OS-level encrypted `SecretStorage` keychain.
 
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
+---
 
-## Working with Markdown
+## Workspace Settings & Configurations
 
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
+Continued allows you to switch between model endpoints directly from the sidebar. Tap the **⚙️ (Settings Gear Icon)** at the top of the panel to bring up the Provider Registration panel.
 
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
+### Setting up Cloud Providers (Blablador)
+To connect your Helmholtz Blablador remote workspace models:
+1. Click the **⚙️** icon in the sidebar control row.
+2. Input your **Personal Access Token** obtained via your Helmholtz Codebase profile.
+3. The panel will automatically query the API endpoint (`https://api.blablador.fz-juelich.de/v1/models`) and cleanly populate your dropdown menu with prefix tags like `blablador/alias-code`.
 
-## For more information
+---
 
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
+## Extension Settings
 
-**Enjoy!**
-# continued
+This extension contributes the following internal command allocations:
+
+* `continued.addProvider`: Invokes the secure user token setup modal.
+* `continued.helloWorld`: Launches inline command box inputs inside active editors.
+
+---
+
+## Prerequisites & Requirements
+
+* **Local Inference:** To access local models offline, ensure you have [Ollama](https://ollama.com) running locally (`http://localhost:11434`) with at least one model pulled (e.g., `ollama pull llama3`).
+* **Cloud Infrastructure:** A GitLab account registered with an EduGAIN or university network is required to claim your Blablador API token for remote usage.
+
+---
+
+## Release Notes
+
+### 1.0.0
+* Initial Release of the modularized core.
+* Implemented the sidebar panel architecture containing historic chat session caching.
+* Added multi-mode execution: **Chat**, **Agent**, and **Agent Auto-Edit**.
+* Unified Local Ollama tags with OpenAI-compatible streaming endpoints from Blablador.
+
+---
+
+**Enjoy a frictionless assistant experience with Continued!**
