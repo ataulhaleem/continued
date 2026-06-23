@@ -3,7 +3,7 @@
  * Built with pure regex to ensure 0% external runtime dependency failures.
  */
 export function compileMarkdownToHtml(rawText: string): string {
-    if (!rawText) return '';
+    if (!rawText) {return '';}
 
     let html = rawText;
 
