@@ -5,7 +5,7 @@ export async function showProviderSelector(context: vscode.ExtensionContext) {
         { label: "OpenAI", description: "Use GPT models" },
         { label: "Gemini", description: "Use Google Gemini" },
         { label: "Anthropic", description: "Use Claude models" },
-        { label: "BlaBlaDoor", description: "FZJ Jülich gateway" }
+        { label: "BLABLADOR", description: "FZJ Jülich gateway" }
     ];
 
     const selection = await vscode.window.showQuickPick(providers, {
@@ -25,6 +25,7 @@ async function promptForApiKey(context: vscode.ExtensionContext, provider: strin
 
     if (key) {
         await context.secrets.store(`${provider.toLowerCase()}_api_key`, key);
+        await vscode.commands.executeCommand('continued.refreshModels');
         vscode.window.showInformationMessage(`${provider} has been successfully configured!`);
     }
 }

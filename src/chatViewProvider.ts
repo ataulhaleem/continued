@@ -69,7 +69,7 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
 
                     // 2. Fetch Blablador Cloud Models if API Key exists
                     try {
-                        const blabladorKey = await this._context.secrets.get('blabladoor_api_key');
+                        const blabladorKey = await this._context.secrets.get('blablador_api_key');
                         if (blabladorKey) {
                             const blabladorRes = await fetch('https://api.blablador.fz-juelich.de/v1/models', {
                                 headers: { 'Authorization': `Bearer ${blabladorKey}` }
@@ -243,7 +243,7 @@ If the user asks you to delete a file, output the precise <delete_file path="...
 
                         if (isBlablador) {
                             const pureModelName = selectedModel.replace('blablador/', '');
-                            const blabladorKey = await this._context.secrets.get('blabladoor_api_key');
+                            const blabladorKey = await this._context.secrets.get('blablador_api_key');
                             
                             fetchUrl = 'https://api.blablador.fz-juelich.de/v1/chat/completions';
                             fetchHeaders['Authorization'] = `Bearer ${blabladorKey}`;
@@ -432,110 +432,279 @@ If the user asks you to delete a file, output the precise <delete_file path="...
         }
     }
 
-    private _getHtmlForWebview(webview: vscode.Webview) {
+private _getHtmlForWebview(webview: vscode.Webview) {
         return `<!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
+                :root {
+                    --border-radius-sm: 4px;
+                    --border-radius-md: 8px;
+                    --border-radius-lg: 12px;
+                    --transition-fast: 0.15s ease;
+                }
+
                 body {
-                    padding: 10px;
+                    padding: 12px;
                     color: var(--vscode-foreground);
                     font-family: var(--vscode-font-family);
                     background-color: var(--vscode-sideBar-background);
+                    margin: 0;
+                    display: flex;
+                    flex-direction: column;
+                    height: 100vh;
+                    box-sizing: border-box;
                 }
+
                 .hidden { display: none !important; }
                 
-                #history-screen { display: flex; flex-direction: column; gap: 10px; }
+                /* Global Scrollbar Customization */
+                ::-webkit-scrollbar { width: 6px; height: 6px; }
+                ::-webkit-scrollbar-track { background: transparent; }
+                ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 10px; }
+                ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
+
+                /* History Screen Styling */
+                #history-screen { display: flex; flex-direction: column; gap: 12px; height: 100%; }
+                
                 .new-chat-btn {
                     background: var(--vscode-button-background);
                     color: var(--vscode-button-foreground);
                     border: none;
-                    padding: 8px;
-                    font-weight: bold;
+                    padding: 10px 14px;
+                    font-weight: 600;
+                    border-radius: var(--border-radius-md);
                     cursor: pointer;
                     text-align: center;
+                    transition: filter var(--transition-fast), transform var(--transition-fast);
+                    font-size: 13px;
                 }
+                .new-chat-btn:hover {
+                    filter: brightness(1.15);
+                    transform: translateY(-1px);
+                }
+                .new-chat-btn:active { transform: translateY(0); }
+
+                .section-header {
+                    font-size: 11px;
+                    font-weight: 700;
+                    margin-top: 8px;
+                    letter-spacing: 0.05em;
+                    color: var(--vscode-descriptionForeground);
+                    text-transform: uppercase;
+                }
+
+                #sessions-list-container {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                    overflow-y: auto;
+                    flex-grow: 1;
+                }
+
                 .session-item {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    background: var(--vscode-textBlockQuote-background);
-                    padding: 8px;
-                    border-radius: 4px;
+                    background: var(--vscode-keybindingTable-rowsBackground, var(--vscode-textBlockQuote-background));
+                    padding: 10px 12px;
+                    border-radius: var(--border-radius-md);
                     cursor: pointer;
-                    border: 1px solid transparent;
+                    border: 1px solid var(--vscode-widget-border, transparent);
+                    transition: border-color var(--transition-fast), background var(--transition-fast);
                 }
-                .session-item:hover { border-color: var(--vscode-button-background); }
-                .session-title { flex-grow: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-                .delete-session-btn { background: transparent; color: var(--vscode-errorForeground); border: none; cursor: pointer; font-weight: bold; padding: 0 5px; }
+                .session-item:hover { 
+                    border-color: var(--vscode-button-background);
+                    background: var(--vscode-list-hoverBackground);
+                }
+                .session-title { flex-grow: 1; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
+                .delete-session-btn { 
+                    background: transparent; 
+                    color: var(--vscode-descriptionForeground); 
+                    border: none; 
+                    cursor: pointer; 
+                    font-size: 16px;
+                    line-height: 1;
+                    padding: 2px 6px; 
+                    border-radius: var(--border-radius-sm);
+                    transition: color var(--transition-fast), background var(--transition-fast);
+                }
+                .delete-session-btn:hover {
+                    color: var(--vscode-errorForeground);
+                    background: var(--vscode-list-invalidItemForeground, rgba(255,0,0,0.1));
+                }
 
-                #chat-container { display: flex; flex-direction: column; height: calc(100vh - 20px); }
-                #controls-row { display: flex; gap: 4px; margin-bottom: 10px; align-items: center; width: 100%; }
+                /* Active Chat Interface layout */
+                #chat-container { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+                
+                #controls-row { 
+                    display: flex; 
+                    gap: 6px; 
+                    margin-bottom: 12px; 
+                    align-items: center; 
+                    width: 100%;
+                    background: var(--vscode-editor-background);
+                    padding: 6px;
+                    border-radius: var(--border-radius-md);
+                    border: 1px solid var(--vscode-panel-border);
+                    box-sizing: border-box;
+                }
+                
                 select, button.control-btn {
                     background: var(--vscode-dropdown-background);
                     color: var(--vscode-dropdown-foreground);
                     border: 1px solid var(--vscode-dropdown-border);
-                    padding: 4px;
+                    padding: 5px 8px;
                     font-size: 12px;
+                    border-radius: var(--border-radius-sm);
+                    outline: none;
                 }
+                select { cursor: pointer; }
+                button.control-btn:hover {
+                    background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+                    cursor: pointer;
+                }
+                
                 #messages {
                     flex-grow: 1;
                     overflow-y: auto;
-                    margin-bottom: 10px;
-                    border: 1px solid var(--vscode-panel-border);
-                    padding: 5px;
-                    max-height: 55vh;
+                    margin-bottom: 12px;
+                    padding: 4px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
                 }
-                .message { margin-bottom: 8px; padding: 8px; border-radius: 4px; word-wrap: break-word; white-space: pre-wrap; }
-                .user { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-                .ai { background: var(--vscode-textBlockQuote-background); border-left: 3px solid var(--vscode-button-background); }
                 
+                .message { 
+                    padding: 10px 14px; 
+                    border-radius: var(--border-radius-md); 
+                    word-wrap: break-word; 
+                    white-space: pre-wrap; 
+                    font-size: 13px;
+                    line-height: 1.45;
+                    max-width: 90%;
+                }
+                .user { 
+                    background: var(--vscode-button-background); 
+                    color: var(--vscode-button-foreground); 
+                    align-self: flex-end;
+                    border-bottom-right-radius: 2px;
+                }
+                .ai { 
+                    background: var(--vscode-textBlockQuote-background); 
+                    color: var(--vscode-foreground);
+                    align-self: flex-start;
+                    border-left: 3px solid var(--vscode-button-background);
+                    border-top-left-radius: 2px;
+                }
+                
+                /* Agent Dynamic Notification Sheets */
                 #approval-panel, #delete-panel, #save-discard-panel {
                     display: none;
                     flex-direction: column;
                     background: var(--vscode-editorWidget-background);
                     border: 1px solid var(--vscode-editorWidget-border);
-                    padding: 8px;
-                    margin-bottom: 8px;
-                    border-radius: 4px;
+                    padding: 12px;
+                    margin-bottom: 12px;
+                    border-radius: var(--border-radius-lg);
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                    animation: slideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
                 }
-                .panel-header { font-size: 11px; margin-bottom: 6px; font-weight: bold; }
+                @keyframes slideUp {
+                    from { transform: translateY(8px); opacity: 0; }
+                    to { transform: translateY(0); opacity: 1; }
+                }
+                
+                .panel-header { font-size: 12px; margin-bottom: 10px; font-weight: 600; line-height: 1.3; }
                 .approval-header { color: var(--vscode-editorWarning-foreground); }
                 .delete-header { color: var(--vscode-errorForeground); }
                 .save-discard-header { color: var(--vscode-editorInfo-foreground); }
                 
-                .button-row { display: flex; gap: 5px; }
-                .button-row button { flex: 1; padding: 4px; border: none; cursor: pointer; font-weight: bold; }
+                .button-row { display: flex; gap: 8px; }
+                .button-row button { 
+                    flex: 1; 
+                    padding: 6px 10px; 
+                    border: none; 
+                    cursor: pointer; 
+                    font-weight: 600; 
+                    font-size: 12px;
+                    border-radius: var(--border-radius-sm);
+                    transition: filter var(--transition-fast);
+                }
+                .button-row button:hover { filter: brightness(1.1); }
                 
                 .btn-primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
                 .btn-secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
                 .btn-danger { background: var(--vscode-errorForeground); color: white; }
 
-                #input-area { display: flex; gap: 5px; }
-                textarea { flex-grow: 1; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); resize: none; padding: 4px; }
-                button#send-btn { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; cursor: pointer; padding: 5px 10px; }
+                /* Modern Chat Input Box Pill */
+                #input-area { 
+                    display: flex; 
+                    flex-direction: column;
+                    background: var(--vscode-input-background); 
+                    border: 1px solid var(--vscode-input-border);
+                    border-radius: var(--border-radius-lg);
+                    padding: 8px;
+                    transition: border-color var(--transition-fast);
+                }
+                #input-area:focus-within {
+                    border-color: var(--vscode-focusBorder);
+                }
+                
+                textarea { 
+                    width: 100%;
+                    background: transparent; 
+                    color: var(--vscode-input-foreground); 
+                    border: none;
+                    resize: none; 
+                    outline: none;
+                    font-family: var(--vscode-font-family);
+                    font-size: 13px;
+                    box-sizing: border-box;
+                    padding: 2px 4px;
+                }
+                
+                .input-actions-row {
+                    display: flex;
+                    justify-content: flex-end;
+                    margin-top: 4px;
+                }
+
+                button#send-btn { 
+                    background: var(--vscode-button-background); 
+                    color: var(--vscode-button-foreground); 
+                    border: none; 
+                    cursor: pointer; 
+                    padding: 6px 14px; 
+                    font-weight: 600;
+                    font-size: 12px;
+                    border-radius: var(--border-radius-sm);
+                    transition: filter var(--transition-fast), transform var(--transition-fast);
+                }
+                button#send-btn:hover { filter: brightness(1.1); }
+                button#send-btn:active { transform: scale(0.98); }
             </style>
         </head>
         <body>
             <div id="history-screen">
                 <button class="new-chat-btn" id="new-chat-btn">+ Start New Conversation</button>
-                <div style="font-size: 11px; font-weight: bold; margin-top: 5px; color: var(--vscode-descriptionForeground);">RECENT CHATS</div>
+                <div class="section-header">Recent Chats</div>
                 <div id="sessions-list-container"></div>
             </div>
 
             <div id="chat-container" class="hidden">
                 <div id="controls-row">
-                    <button id="back-btn" class="control-btn" style="flex: 0 0 auto;">⬅ Back</button>
-                    <select id="model-select" style="flex: 1 1 auto; min-width: 0;"><option value="llama3">Loading...</option></select>
-                    <select id="mode-select" style="flex: 1 1 auto; min-width: 0;">
+                    <button id="back-btn" class="control-btn" title="Go Back">⬅</button>
+                    <select id="model-select" style="flex: 1 1 40%; min-width: 0;"><option value="llama3">Loading...</option></select>
+                    <select id="mode-select" style="flex: 1 1 40%; min-width: 0;">
                         <option value="agent">Agent Mode</option>
                         <option value="agent-auto">Agent Auto-Edit</option>
                         <option value="chat">Chat Mode</option>
                     </select>
-                    <button id="clear-btn" class="control-btn" style="flex: 0 0 auto;">Clear</button>
-                    <button id="settings-btn" class="control-btn" style="flex: 0 0 auto; cursor: pointer; padding: 4px 6px;" title="Import Cloud Provider">⚙️</button>
+                    <button id="clear-btn" class="control-btn" title="Clear Chat">Clear</button>
+                    <button id="settings-btn" class="control-btn" style="padding: 4px 6px;" title="Import Cloud Provider">⚙️</button>
                 </div>
                 
                 <div id="messages"></div>
@@ -565,8 +734,10 @@ If the user asks you to delete a file, output the precise <delete_file path="...
                 </div>
 
                 <div id="input-area">
-                    <textarea id="prompt" rows="2" placeholder="Ask Continued..."></textarea>
-                    <button id="send-btn">Send</button>
+                    <textarea id="prompt" rows="3" placeholder="Ask Continued..."></textarea>
+                    <div class="input-actions-row">
+                        <button id="send-btn">Send</button>
+                    </div>
                 </div>
             </div>
 
@@ -654,7 +825,7 @@ If the user asks you to delete a file, output the precise <delete_file path="...
                     vscode.postMessage({ type: 'respondToEdit', action: 'Allow' });
                 });
 
-                document.getElementById('deny-btn').addEventListener('click', () => {
+                denyBtn.addEventListener('click', () => {
                     approvalPanel.style.display = 'none';
                     vscode.postMessage({ type: 'respondToEdit', action: 'Deny' });
                 });
@@ -775,5 +946,43 @@ If the user asks you to delete a file, output the precise <delete_file path="...
             </script>
         </body>
         </html>`;
+    }
+
+    public async triggerModelRefresh() {
+        if (!this._view) {
+            return; // Webview isn't open or active yet
+        }
+        
+        let modelNames: string[] = [];
+
+        // 1. Fetch Local Ollama Models
+        try {
+            const res = await fetch('http://localhost:11434/api/tags');
+            const json = await res.json() as { models: Array<{ name: string }> };
+            modelNames = json.models.map((m) => m.name);
+        } catch {
+            modelNames = ['llama3']; 
+        }
+
+        // 2. Fetch Blablador Cloud Models
+        try {
+            const blabladorKey = await this._context.secrets.get('blabladoor_api_key');
+            if (blabladorKey) {
+                const blabladorRes = await fetch('https://api.blablador.fz-juelich.de/v1/models', {
+                    headers: { 'Authorization': `Bearer ${blabladorKey}` }
+                });
+                
+                if (blabladorRes.ok) {
+                    const json = await blabladorRes.json() as { data: Array<{ id: string }> };
+                    const cloudModels = json.data.map(m => `blablador/${m.id}`);
+                    modelNames = [...modelNames, ...cloudModels];
+                }
+            }
+        } catch (err) {
+            console.error("Failed to append Blablador models:", err);
+        }
+
+        // Push the fresh array directly to the active webview window immediately
+        this._view.webview.postMessage({ type: 'setModels', models: modelNames });
     }
 }

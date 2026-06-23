@@ -2,7 +2,7 @@
   "name": "continued",
   "displayName": "continued",
   "description": "drop in replacement for continue.dev",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "AtaUlHaleem",
   "repository": {
     "type": "git",
