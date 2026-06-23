@@ -43,8 +43,27 @@ This extension contributes the following internal command allocations:
 ---
 
 ## Release Notes
+## 0.0.3
 
-### 1.0.0
+### Visual & UX
+- Modern glassmorphic UI with fluid animations and pill-shaped inputs
+- Native VS Code scrollbar integration
+
+### Model Management
+- Dynamic model syncing - no restart required for credential updates
+- Instant model list refresh after API key configuration
+
+### Session Management
+- Improved session caching with clean title generation
+- Individual chat deletion with × button interface
+
+### Stability
+- Stream buffer optimization with line-buffering for SSE parsing
+- Enhanced error handling for broken JSON packets
+
+
+### 0.0.2
+### 0.0.1
 * Initial Release of the modularized core.
 * Implemented the sidebar panel architecture containing historic chat session caching.
 * Added multi-mode execution: **Chat**, **Agent**, and **Agent Auto-Edit**.

@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+:root{
+    --border-radius-sm:4px;
+    --border-radius-md:8px;
+    --border-radius-lg:12px;
+    --transition-fast:0.15s ease;
+}
+body{
+    padding:12px;
+    color:var(--vscode-foreground);
+    font-family:var(--vscode-font-family);
+    background-color:var(--vscode-sideBar-background);
+    margin:0;
+    display:flex;
+    flex-direction:column;
+    height:100vh;
+    box-sizing:border-box;
+}
+.hidden{display:none!important;}
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--vscode-scrollbarSlider-background);border-radius:10px;}
+::-webkit-scrollbar-thumb:hover{background:var(--vscode-scrollbarSlider-hoverBackground);}
+
+#history-screen{display:flex;flex-direction:column;gap:12px;height:100%;}
+.new-chat-btn{
+    background:var(--vscode-button-background);
+    color:var(--vscode-button-foreground);
+    border:none;
+    padding:10px 14px;
+    font-weight:600;
+    border-radius:var(--border-radius-md);
+    cursor:pointer;
+    text-align:center;
+    transition:filter var(--transition-fast),transform var(--transition-fast);
+    font-size:13px;
+}
+.new-chat-btn:hover{filter:brightness(1.15);transform:translateY(-1px);}
+.new-chat-btn:active{transform:translateY(0);}
+.section-header{
+    font-size:11px;
+    font-weight:700;
+    margin-top:8px;
+    letter-spacing:0.05em;
+    color:var(--vscode-descriptionForeground);
+    text-transform:uppercase;
+}
+#sessions-list-container{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    overflow-y:auto;
+    flex-grow:1;
+}
+.session-item{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    background:var(--vscode-keybindingTable-rowsBackground,var(--vscode-textBlockQuote-background));
+    padding:10px 12px;
+    border-radius:var(--border-radius-md);
+    cursor:pointer;
+    border:1px solid var(--vscode-widget-border,transparent);
+    transition:border-color var(--transition-fast),background var(--transition-fast);
+}
+.session-item:hover{
+    border-color:var(--vscode-button-background);
+    background:var(--vscode-list-hoverBackground);
+}
+.session-title{
+    flex-grow:1;
+    font-size:12.5px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    padding-right:8px;
+}
+.delete-session-btn{
+    background:transparent;
+    color:var(--vscode-descriptionForeground);
+    border:none;
+    cursor:pointer;
+    font-size:16px;
+    line-height:1;
+    padding:2px 6px;
+    border-radius:var(--border-radius-sm);
+    transition:color var(--transition-fast),background var(--transition-fast);
+}
+.delete-session-btn:hover{
+    color:var(--vscode-errorForeground);
+    background:var(--vscode-list-invalidItemForeground,rgba(255,0,0,0.1));
+}
+
+#chat-container{display:flex;flex-direction:column;height:100%;overflow:hidden;}
+#controls-row{
+    display:flex;
+    gap:6px;
+    margin-bottom:12px;
+    align-items:center;
+    width:100%;
+    background:var(--vscode-editor-background);
+    padding:6px;
+    border-radius:var(--border-radius-md);
+    border:1px solid var(--vscode-panel-border);
+    box-sizing:border-box;
+}
+select,button.control-btn{
+    background:var(--vscode-dropdown-background);
+    color:var(--vscode-dropdown-foreground);
+    border:1px solid var(--vscode-dropdown-border);
+    padding:5px 8px;
+    font-size:12px;
+    border-radius:var(--border-radius-sm);
+    outline:none;
+}
+select{cursor:pointer;}
+button.control-btn:hover{
+    background:var(--vscode-button-secondaryHoverBackground,var(--vscode-list-hoverBackground));
+    cursor:pointer;
+}
+#messages{
+    flex-grow:1;
+    overflow-y:auto;
+    margin-bottom:12px;
+    padding:4px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+.message{
+    padding:10px 14px;
+    border-radius:var(--border-radius-md);
+    word-wrap:break-word;
+    white-space:pre-wrap;
+    font-size:13px;
+    line-height:1.45;
+    max-width:90%;
+}
+.user{
+    background:var(--vscode-button-background);
+    color:var(--vscode-button-foreground);
+    align-self:flex-end;
+    border-bottom-right-radius:2px;
+}
+.ai{
+    background:var(--vscode-textBlockQuote-background);
+    color:var(--vscode-foreground);
+    align-self:flex-start;
+    border-left:3px solid var(--vscode-button-background);
+    border-top-left-radius:2px;
+}
+
+#approval-panel,#delete-panel,#save-discard-panel{
+    display:none;
+    flex-direction:column;
+    background:var(--vscode-editorWidget-background);
+    border:1px solid var(--vscode-editorWidget-border);
+    padding:12px;
+    margin-bottom:12px;
+    border-radius:var(--border-radius-lg);
+    box-shadow:0 4px 12px rgba(0,0,0,0.15);
+    animation:slideUp .2s cubic-bezier(.16,1,.3,1);
+}
+@keyframes slideUp{
+    from{transform:translateY(8px);opacity:0;}
+    to{transform:translateY(0);opacity:1;}
+}
+.panel-header{font-size:12px;margin-bottom:10px;font-weight:600;line-height:1.3;}
+.approval-header{color:var(--vscode-editorWarning-foreground);}
+.delete-header{color:var(--vscode-errorForeground);}
+.save-discard-header{color:var(--vscode-editorInfo-foreground);}
+.button-row{
+    display:flex;
+    gap:8px;
+}
+.button-row button{
+    flex:1;
+    padding:6px 10px;
+    border:none;
+    cursor:pointer;
+    font-weight:600;
+    font-size:12px;
+    border-radius:var(--border-radius-sm);
+    transition:filter var(--transition-fast);
+}
+.button-row button:hover{filter:brightness(1.1);}
+.btn-primary{background:var(--vscode-button-background);color:var(--vscode-button-foreground);}
+.btn-secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);}
+.btn-danger{background:var(--vscode-errorForeground);color:#fff;}
+
+#input-area{
+    display:flex;
+    flex-direction:column;
+    background:var(--vscode-input-background);
+    border:1px solid var(--vscode-input-border);
+    border-radius:var(--border-radius-lg);
+    padding:8px;
+    transition:border-color var(--transition-fast);
+}
+#input-area:focus-within{border-color:var(--vscode-focusBorder);}
+textarea{
+    width:100%;
+    background:transparent;
+    color:var(--vscode-input-foreground);
+    border:none;
+    resize:none;
+    outline:none;
+    font-family:var(--vscode-font-family);
+    font-size:13px;
+    box-sizing:border-box;
+    padding:2px 4px;
+}
+.input-actions-row{
+    display:flex;
+    justify-content:flex-end;
+    margin-top:4px;
+}
+button#send-btn{
+    background:var(--vscode-button-background);
+    color:var(--vscode-button-foreground);
+    border:none;
+    cursor:pointer;
+    padding:6px 14px;
+    font-weight:600;
+    font-size:12px;
+    border-radius:var(--border-radius-sm);
+    transition:filter var(--transition-fast),transform var(--transition-fast);
+}
+button#send-btn:hover{filter:brightness(1.1);}
+button#send-btn:active{transform:scale(.98);}
+</style>
+</head>
+<body>
+<div id="history-screen">
+    <button class="new-chat-btn" id="new-chat-btn">+ Start New Conversation</button>
+    <div class="section-header">Recent Chats</div>
+    <div id="sessions-list-container"></div>
+</div>
+
+<div id="chat-container" class="hidden">
+    <div id="controls-row">
+        <button id="back-btn" class="control-btn" title="Go Back">⬅</button>
+        <select id="model-select" style="flex:1 1 40%;min-width:0;"><option value="llama3">Loading...</option></select>
+        <select id="mode-select" style="flex:1 1 40%;min-width:0;">
+            <option value="agent">Agent Mode</option>
+            <option value="agent-auto">Agent Auto-Edit</option>
+            <option value="chat">Chat Mode</option>
+        </select>
+        <button id="clear-btn" class="control-btn" title="Clear Chat">Clear</button>
+        <button id="settings-btn" class="control-btn" style="padding:4px 6px;" title="Import Cloud Provider">⚙️</button>
+    </div>
+
+    <div id="messages"></div>
+
+    <div id="approval-panel">
+        <div id="approval-msg" class="panel-header approval-header">Agent wants to edit file...</div>
+        <div class="button-row">
+            <button id="allow-btn" class="btn-primary">Allow Edit</button>
+            <button id="deny-btn" class="btn-secondary">Deny</button>
+        </div>
+    </div>
+
+    <div id="delete-panel">
+        <div id="delete-msg" class="panel-header delete-header">Agent wants to delete file...</div>
+        <div class="button-row">
+            <button id="allow-del-btn" class="btn-danger">Allow Delete</button>
+            <button id="deny-del-btn" class="btn-secondary">Deny</button>
+        </div>
+    </div>
+
+    <div id="save-discard-panel">
+        <div id="save-discard-msg" class="panel-header save-discard-header">Review transaction...</div>
+        <div class="button-row">
+            <button id="keep-btn" class="btn-primary">Keep Action</button>
+            <button id="discard-btn" class="btn-danger">Discard / Undo</button>
+        </div>
+    </div>
+
+    <div id="input-area">
+        <textarea id="prompt" rows="3" placeholder="Ask Continued..."></textarea>
+        <div class="input-actions-row">
+            <button id="send-btn">Send</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const vscode = acquireVsCodeApi();
+
+    function compileMarkdownToHtml(rawText) {
+        if (!rawText) return '';
+
+        let html = rawText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(match, lang, code) {
+            const language = (lang || '').trim() || 'plaintext';
+            const uid = 'code_' + Math.random().toString(36).substring(2, 11);
+            const trimmed = code.trim();
+
+            return `
+            <div class="code-block-wrapper" style="margin:10px 0;border-radius:6px;overflow:hidden;background:#1e1e1e;border:1px solid var(--vscode-panel-border);">
+                <div class="code-block-header" style="display:flex;justify-content:space-between;align-items:center;background:#2d2d2d;color:#ccc;padding:5px 10px;font-size:11px;font-family:var(--vscode-font-family);">
+                    <span style="text-transform:uppercase;font-weight:600;">${language}</span>
+                    <button class="copy-btn" onclick="window.copyCodeSnippet('${uid}')" style="background:rgba(255,255,255,0.1);color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;">Copy</button>
+                </div>
+                <pre style="margin:0;padding:10px;overflow-x:auto;font-family:var(--vscode-editor-font-family,monospace);font-size:12px;color:#d4d4d4;"><code id="${uid}">${trimmed}</code></pre>
+            </div>`;
+        });
+
+        html = html.replace(/`([^`]+)`/g, '<code style="background:rgba(120,120,120,0.15);padding:2px 4px;border-radius:3px;font-family:monospace;">$1</code>');
+        html = html.replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>');
+        html = html.split('\n\n').map(p => p.trim() ? `<p style="margin:4px 0 8px 0;">${p}</p>` : '').join('');
+
+        return html;
+    }
+
+    window.copyCodeSnippet = function(elementId) {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        const text = el.innerText;
+        navigator.clipboard.writeText(text).then(() => {
+            const btn = el.closest('.code-block-wrapper').querySelector('.copy-btn');
+            const original = btn.textContent;
+            btn.textContent = 'Copied!';
+            setTimeout(() => btn.textContent = original, 1500);
+        }).catch(err => console.error('Copy failed', err));
+    };
+
+    let currentAiBubble = null;
+
+    function appendMessage(text, role) {
+        document.getElementById('chat-container').classList.remove('hidden');
+        document.getElementById('history-screen').classList.add('hidden');
+
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'message ' + (role === 'user' ? 'user' : 'ai');
+        msgDiv.textContent = text;
+        document.getElementById('messages').appendChild(msgDiv);
+        document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+
+        if (role === 'assistant') currentAiBubble = msgDiv;
+    }
+
+    function replaceCurrentAiBubbleWithHtml(html) {
+        if (currentAiBubble) {
+            currentAiBubble.innerHTML = html;
+            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+        }
+    }
+
+    const historyScreen = document.getElementById('history-screen');
+    const sessionsListContainer = document.getElementById('sessions-list-container');
+    const newChatBtn = document.getElementById('new-chat-btn');
+
+    const chatContainer = document.getElementById('chat-container');
+    const backBtn = document.getElementById('back-btn');
+    const sendBtn = document.getElementById('send-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const settingsBtn = document.getElementById('settings-btn');
+    const promptInput = document.getElementById('prompt');
+    const messagesDiv = document.getElementById('messages');
+    const modelSelect = document.getElementById('model-select');
+    const modeSelect = document.getElementById('mode-select');
+
+    const approvalPanel = document.getElementById('approval-panel');
+    const approvalMsg = document.getElementById('approval-msg');
+    const allowBtn = document.getElementById('allow-btn');
+    const denyBtn = document.getElementById('deny-btn');
+
+    const deletePanel = document.getElementById('delete-panel');
+    const deleteMsg = document.getElementById('delete-msg');
+    const allowDelBtn = document.getElementById('allow-del-btn');
+    const denyDelBtn = document.getElementById('deny-del-btn');
+
+    const saveDiscardPanel = document.getElementById('save-discard-panel');
+    const saveDiscardMsg = document.getElementById('save-discard-msg');
+    const keepBtn = document.getElementById('keep-btn');
+    const discardBtn = document.getElementById('discard-btn');
+
+    vscode.postMessage({ type: 'getModels' });
+
+    newChatBtn.addEventListener('click', () => vscode.postMessage({ type: 'startNewChat' }));
+    settingsBtn.addEventListener('click', () => vscode.postMessage({ type: 'openSettings' }));
+    backBtn.addEventListener('click', () => {
+        chatContainer.classList.add('hidden');
+        historyScreen.classList.remove('hidden');
+        vscode.postMessage({ type: 'showHistoryList' });
+    });
+    clearBtn.addEventListener('click', () => {
+        messagesDiv.innerHTML = '';
+        approvalPanel.style.display = 'none';
+        deletePanel.style.display = 'none';
+        saveDiscardPanel.style.display = 'none';
+        vscode.postMessage({ type: 'clearHistory' });
+    });
+    sendBtn.addEventListener('click', () => {
+        const txt = promptInput.value.trim();
+        if (!txt) return;
+        appendMessage(txt, 'user');
+        vscode.postMessage({ type: 'sendPrompt', value: txt, model: modelSelect.value, mode: modeSelect.value });
+        promptInput.value = '';
+    });
+    promptInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendBtn.click();
+        }
+    });
+    allowBtn.addEventListener('click', () => {
+        approvalPanel.style.display = 'none';
+        vscode.postMessage({ type: 'respondToEdit', action: 'Allow' });
+    });
+    denyBtn.addEventListener('click', () => {
+        approvalPanel.style.display = 'none';
+        vscode.postMessage({ type: 'respondToEdit', action: 'Deny' });
+    });
+    allowDelBtn.addEventListener('click', () => {
+        deletePanel.style.display = 'none';
+        vscode.postMessage({ type: 'respondToDelete', action: 'Allow' });
+    });
+    denyDelBtn.addEventListener('click', () => {
+        deletePanel.style.display = 'none';
+        vscode.postMessage({ type: 'respondToDelete', action: 'Deny' });
+    });
+    keepBtn.addEventListener('click', () => {
+        saveDiscardPanel.style.display = 'none';
+        vscode.postMessage({ type: 'respondToSaveDiscard', action: 'Keep' });
+    });
+    discardBtn.addEventListener('click', () => {
+        saveDiscardPanel.style.display = 'none';
+        vscode.postMessage({ type: 'respondToSaveDiscard', action: 'Discard' });
+    });
+
+    window.addEventListener('message', event => {
+        const msg = event.data;
+        switch (msg.type) {
+            case 'loadSessionView': {
+                chatContainer.classList.remove('hidden');
+                historyScreen.classList.add('hidden');
+                messagesDiv.innerHTML = '';
+                if (msg.mode) modeSelect.value = msg.mode;
+                msg.history.forEach(m => appendMessage(m.content, m.role));
+                break;
+            }
+            case 'renderSessions': {
+                sessionsListContainer.innerHTML = '';
+                msg.sessions.forEach(s => {
+                    const item = document.createElement('div');
+                    item.className = 'session-item';
+
+                    const title = document.createElement('span');
+                    title.className = 'session-title';
+                    title.textContent = s.title || 'Untitled Chat';
+                    title.addEventListener('click', () => vscode.postMessage({ type: 'selectSession', sessionId: s.id }));
+
+                    const del = document.createElement('button');
+                    del.className = 'delete-session-btn';
+                    del.textContent = '×';
+                    del.addEventListener('click', e => {
+                        e.stopPropagation();
+                        vscode.postMessage({ type: 'deleteSession', sessionId: s.id });
+                    });
+
+                    item.appendChild(title);
+                    item.appendChild(del);
+                    sessionsListContainer.appendChild(item);
+                });
+                break;
+            }
+            case 'setModels': {
+                modelSelect.innerHTML = '';
+                msg.models.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    opt.textContent = m;
+                    modelSelect.appendChild(opt);
+                });
+                break;
+            }
+            case 'startStream': {
+                appendMessage('', 'assistant');
+                break;
+            }
+            case 'streamToken': {
+                if (currentAiBubble) {
+                    currentAiBubble.textContent += msg.value;
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                }
+                break;
+            }
+            case 'assistantResponse': {
+                const rendered = compileMarkdownToHtml(msg.content);
+                replaceCurrentAiBubbleWithHtml(rendered);
+                break;
+            }
+            case 'requestEditApproval': {
+                approvalMsg.textContent = 'Agent wants to edit: ' + msg.filename;
+                approvalPanel.style.display = 'flex';
+                break;
+            }
+            case 'requestDeleteApproval': {
+                deleteMsg.textContent = 'Agent wants to delete: ' + msg.filename;
+                deletePanel.style.display = 'flex';
+                break;
+            }
+            case 'showSaveDiscardPanel': {
+                saveDiscardMsg.textContent = (msg.msgType === 'delete' ? 'Deleted ' : 'Modified ') + msg.filename + '. Commit changes?';
+                saveDiscardPanel.style.display = 'flex';
+                break;
+            }
+        }
+    });
+})();
+</script>
+</body>
+</html>
