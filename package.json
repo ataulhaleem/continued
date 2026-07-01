@@ -2,7 +2,7 @@
   "name": "continued",
   "displayName": "continued",
   "description": "drop in replacement for continue.dev",
-  "version": "0.0.4",
+  "version": "0.0.6",
   "publisher": "AtaUlHaleem",
   "repository": {
     "type": "git",
@@ -13,9 +13,6 @@
   },
   "categories": [
     "Other"
-  ],
-  "activationEvents": [
-    "onView:continued.chatView"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -33,7 +30,8 @@
         {
           "type": "webview",
           "id": "continued-chat-view",
-          "name": "Chat"
+          "name": "Chat",
+          "icon": "$(comment-discussion)"
         }
       ]
     },

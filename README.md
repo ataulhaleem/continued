@@ -43,6 +43,43 @@ This extension contributes the following internal command allocations:
 ---
 
 ## Release Notes
+
+## 0.0.5
+
+### Bug Fixes
+- Fixed `continued.refreshModels` command never being registered — saving a cloud provider API key now correctly triggers a model list refresh in the sidebar dropdown
+- Fixed agent tool-tag leakage in chat bubbles (`<run_shell .../>`, `<write_file ...>`, `<delete_file ...>`) so users now see clean assistant responses
+- Fixed command/tool-call responses not being properly restored after reload
+
+### Inline Code Completion
+- New `ContinuedCompletionProvider` registered for all file types, powered by whichever model is currently selected in the sidebar
+- Sends up to 2000 chars of prefix context and 500 chars of suffix for fill-in-the-middle (FIM) support
+- Works with local **Ollama** (`/api/generate`) and cloud providers (**Blablador**, **OpenAI**, **Gemini**, **Anthropic**)
+- Cancels in-flight requests immediately when you continue typing
+
+### Persistence & State Restore
+- Last selected model is saved and automatically restored on next launch
+- Last active chat session is saved and auto-loaded when VS Code is relaunched — picks up exactly where you left off
+- Session history and model preference are now workspace-scoped (per opened folder/workspace), so chats no longer bleed across unrelated projects
+
+### Provider Coverage
+- Added OpenAI chat/model support (`openai/...`)
+- Added Gemini chat/model support (`gemini/...`)
+- Added Anthropic chat/model support (`anthropic/...`)
+
+### Agent & Tooling UX
+- Agent can execute shell commands via `<run_shell command="..."/>` with approval in Agent Mode and automatic execution in Agent Auto-Edit
+- Shell command results are now presented as assistant-style narrative responses with compact tool-result notes
+- Command results are persisted into session history and restored with formatting
+
+### Chat UI Improvements
+- Cleaner Markdown rendering for headings, lists, links, blockquotes, inline code, and fenced code blocks
+- Removed the blue left accent stripe from assistant responses
+- Modernized command approval prompt to a cleaner, compact style
+
+---
+## 0.0.4
+
 ## 0.0.3
 
 ### Visual & UX

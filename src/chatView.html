@@ -151,11 +151,123 @@ button.control-btn:hover{
     background:var(--vscode-textBlockQuote-background);
     color:var(--vscode-foreground);
     align-self:flex-start;
-    border-left:3px solid var(--vscode-button-background);
+    border:1px solid var(--vscode-panel-border);
     border-top-left-radius:2px;
+    white-space:normal;
 }
 
-#approval-panel,#delete-panel,#save-discard-panel{
+.ai p{margin:0 0 8px 0;}
+.ai p:last-child{margin-bottom:0;}
+.ai h1,.ai h2,.ai h3,.ai h4,.ai h5,.ai h6{margin:10px 0 8px 0;line-height:1.25;}
+.ai h1{font-size:17px;}
+.ai h2{font-size:16px;}
+.ai h3{font-size:14px;}
+.ai ul,.ai ol{margin:6px 0 10px 20px;padding:0;}
+.ai li{margin:3px 0;}
+.ai blockquote{
+    margin:8px 0;
+    padding:6px 10px;
+    border-left:3px solid var(--vscode-textLink-foreground);
+    background:var(--vscode-editor-background);
+    border-radius:4px;
+}
+.ai a{color:var(--vscode-textLink-foreground);text-decoration:none;}
+.ai a:hover{text-decoration:underline;}
+.ai code.inline-code{
+    background:var(--vscode-textCodeBlock-background,rgba(120,120,120,0.15));
+    padding:2px 5px;
+    border-radius:4px;
+    font-family:var(--vscode-editor-font-family,monospace);
+    font-size:12px;
+}
+
+.md-code-block{
+    margin:10px 0;
+    border-radius:8px;
+    overflow:hidden;
+    border:1px solid var(--vscode-panel-border);
+    background:var(--vscode-editor-background);
+}
+.md-code-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    background:var(--vscode-sideBarSectionHeader-background,var(--vscode-editorWidget-background));
+    color:var(--vscode-descriptionForeground);
+    padding:6px 10px;
+    font-size:11px;
+    font-family:var(--vscode-font-family);
+}
+.md-code-lang{text-transform:uppercase;font-weight:600;}
+.md-copy-btn{
+    background:var(--vscode-button-secondaryBackground);
+    color:var(--vscode-button-secondaryForeground);
+    border:none;
+    padding:2px 8px;
+    border-radius:4px;
+    cursor:pointer;
+    font-size:11px;
+}
+.md-copy-btn:hover{filter:brightness(1.08);}
+.md-code-pre{
+    margin:0;
+    padding:10px;
+    overflow-x:auto;
+    font-family:var(--vscode-editor-font-family,monospace);
+    font-size:12px;
+    line-height:1.45;
+    color:var(--vscode-editor-foreground);
+}
+
+.tool-inline{
+    margin-top:10px;
+    border:1px solid var(--vscode-panel-border);
+    border-radius:8px;
+    background:var(--vscode-editorWidget-background);
+    overflow:hidden;
+}
+.tool-inline-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:10px;
+    padding:6px 10px;
+    font-size:11px;
+    border-bottom:1px solid var(--vscode-panel-border);
+    color:var(--vscode-descriptionForeground);
+}
+.tool-inline-title{
+    font-weight:600;
+    color:var(--vscode-foreground);
+}
+.tool-inline-command{
+    padding:8px 10px;
+    margin:0;
+    font-family:var(--vscode-editor-font-family,monospace);
+    font-size:12px;
+    background:var(--vscode-textCodeBlock-background,var(--vscode-editor-background));
+    overflow-x:auto;
+}
+.tool-inline-note{
+    margin:0;
+    padding:8px 10px;
+    font-size:12px;
+}
+.tool-inline details{padding:0 10px 10px;}
+.tool-inline summary{cursor:pointer;font-size:11px;color:var(--vscode-descriptionForeground);}
+.tool-inline-output{
+    margin:8px 0 0;
+    padding:8px;
+    border:1px solid var(--vscode-panel-border);
+    border-radius:6px;
+    background:var(--vscode-textCodeBlock-background,var(--vscode-editor-background));
+    font-family:var(--vscode-editor-font-family,monospace);
+    font-size:11px;
+    max-height:200px;
+    overflow:auto;
+}
+
+#approval-panel,#delete-panel,#command-panel,#save-discard-panel{
     display:none;
     flex-direction:column;
     background:var(--vscode-editorWidget-background);
@@ -192,6 +304,70 @@ button.control-btn:hover{
 .btn-primary{background:var(--vscode-button-background);color:var(--vscode-button-foreground);}
 .btn-secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);}
 .btn-danger{background:var(--vscode-errorForeground);color:#fff;}
+
+#command-panel{
+    border-color:var(--vscode-textBlockQuote-border,var(--vscode-panel-border));
+    background:var(--vscode-editorWidget-background);
+    gap:8px;
+}
+.cmd-approval-title{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:12.5px;
+    font-weight:600;
+}
+.cmd-approval-icon{
+    width:14px;
+    height:14px;
+    border-radius:50%;
+    background:var(--vscode-terminal-ansiBlue, var(--vscode-button-background));
+    display:inline-block;
+    position:relative;
+}
+.cmd-approval-icon::after{
+    content:'';
+    position:absolute;
+    width:5px;
+    height:5px;
+    border-radius:50%;
+    background:#fff;
+    top:50%;
+    left:50%;
+    transform:translate(-50%, -50%);
+}
+.cmd-approval-shell{
+    font-size:11px;
+    color:var(--vscode-descriptionForeground);
+    background:var(--vscode-badge-background);
+    color:var(--vscode-badge-foreground);
+    border-radius:10px;
+    padding:1px 7px;
+}
+.cmd-approval-preview{
+    border:1px solid var(--vscode-panel-border);
+    background:var(--vscode-textCodeBlock-background,var(--vscode-editor-background));
+    border-radius:8px;
+    padding:10px;
+    font-family:var(--vscode-editor-font-family,monospace);
+    font-size:12px;
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
+}
+.cmd-approval-actions{
+    display:flex;
+    gap:8px;
+}
+.cmd-approval-actions button{
+    border:none;
+    padding:6px 12px;
+    border-radius:6px;
+    font-size:12px;
+    font-weight:600;
+    cursor:pointer;
+}
+.cmd-allow-btn{background:var(--vscode-button-background);color:var(--vscode-button-foreground);}
+.cmd-deny-btn{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);}
 
 #input-area{
     display:flex;
@@ -273,6 +449,18 @@ button#send-btn:active{transform:scale(.98);}
         </div>
     </div>
 
+    <div id="command-panel">
+        <div class="cmd-approval-title">
+            <span class="cmd-approval-icon"></span>
+            <span>Run <span id="command-shell-label" class="cmd-approval-shell">bash</span> command?</span>
+        </div>
+        <div id="command-msg" class="cmd-approval-preview">echo "hello"</div>
+        <div class="cmd-approval-actions">
+            <button id="allow-cmd-btn" class="cmd-allow-btn">Allow</button>
+            <button id="deny-cmd-btn" class="cmd-deny-btn">Skip</button>
+        </div>
+    </div>
+
     <div id="save-discard-panel">
         <div id="save-discard-msg" class="panel-header save-discard-header">Review transaction...</div>
         <div class="button-row">
@@ -292,32 +480,180 @@ button#send-btn:active{transform:scale(.98);}
 <script>
 (function() {
     const vscode = acquireVsCodeApi();
+    const COMMAND_RESULT_PREFIX = '[[COMMAND_RESULT]]';
 
     function compileMarkdownToHtml(rawText) {
         if (!rawText) return '';
 
+        if (rawText.startsWith(COMMAND_RESULT_PREFIX)) {
+            try {
+                const payload = JSON.parse(rawText.slice(COMMAND_RESULT_PREFIX.length));
+                return renderCommandResultHtml(payload.command || '', payload.output || '');
+            } catch {
+                // fallback to regular markdown parser
+            }
+        }
+
+        const codeBlocks = [];
         let html = rawText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
         html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(match, lang, code) {
             const language = (lang || '').trim() || 'plaintext';
             const uid = 'code_' + Math.random().toString(36).substring(2, 11);
-            const trimmed = code.trim();
-
-            return `
-            <div class="code-block-wrapper" style="margin:10px 0;border-radius:6px;overflow:hidden;background:#1e1e1e;border:1px solid var(--vscode-panel-border);">
-                <div class="code-block-header" style="display:flex;justify-content:space-between;align-items:center;background:#2d2d2d;color:#ccc;padding:5px 10px;font-size:11px;font-family:var(--vscode-font-family);">
-                    <span style="text-transform:uppercase;font-weight:600;">${language}</span>
-                    <button class="copy-btn" onclick="window.copyCodeSnippet('${uid}')" style="background:rgba(255,255,255,0.1);color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;">Copy</button>
+            const codeHtml = `
+            <div class="md-code-block">
+                <div class="md-code-header">
+                    <span class="md-code-lang">${language}</span>
+                    <button class="md-copy-btn" onclick="window.copyCodeSnippet('${uid}')">Copy</button>
                 </div>
-                <pre style="margin:0;padding:10px;overflow-x:auto;font-family:var(--vscode-editor-font-family,monospace);font-size:12px;color:#d4d4d4;"><code id="${uid}">${trimmed}</code></pre>
+                <pre class="md-code-pre"><code id="${uid}">${code.trim()}</code></pre>
             </div>`;
+            const token = `__CODE_BLOCK_${codeBlocks.length}__`;
+            codeBlocks.push(codeHtml);
+            return token;
         });
 
-        html = html.replace(/`([^`]+)`/g, '<code style="background:rgba(120,120,120,0.15);padding:2px 4px;border-radius:3px;font-family:monospace;">$1</code>');
-        html = html.replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>');
-        html = html.split('\n\n').map(p => p.trim() ? `<p style="margin:4px 0 8px 0;">${p}</p>` : '').join('');
+        html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
+        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+        html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+        html = html.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>');
+        html = html.replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>');
+        html = html.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
+        html = html.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+        html = html.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+        html = html.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+
+        html = html.replace(/^(?:- |\* )(.+(?:\n(?:- |\* ).+)*)/gm, function(match) {
+            const items = match.split('\n').map(line => `<li>${line.replace(/^(- |\* )/, '')}</li>`).join('');
+            return `<ul>${items}</ul>`;
+        });
+
+        html = html.replace(/^(?:\d+\. )(.+(?:\n\d+\. .+)*)/gm, function(match) {
+            const items = match.split('\n').map(line => `<li>${line.replace(/^\d+\. /, '')}</li>`).join('');
+            return `<ol>${items}</ol>`;
+        });
+
+        html = html.replace(/(^|\n)&gt;\s?(.*)/g, '$1<blockquote>$2</blockquote>');
+
+        const blocks = html.split(/\n\s*\n/).map(b => b.trim()).filter(Boolean);
+        html = blocks.map(block => {
+            if (/^<(h\d|ul|ol|li|blockquote|div|pre)/.test(block)) return block;
+            return `<p>${block.replace(/\n/g, '<br/>')}</p>`;
+        }).join('');
+
+        codeBlocks.forEach((blockHtml, index) => {
+            html = html.replace(`__CODE_BLOCK_${index}__`, blockHtml);
+        });
 
         return html;
+    }
+
+    function escapeHtml(text) {
+        return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function summarizeCommandOutput(command, output) {
+        const trimmed = (output || '').trim();
+        if (!trimmed) {
+            return {
+                headline: 'Done. The command completed successfully with no visible output.',
+                bullets: [],
+                previewType: 'none',
+                preview: ''
+            };
+        }
+
+        const lines = trimmed.split('\n').map(l => l.trimRight()).filter(Boolean);
+
+        if (/^ls(\s|$)/.test((command || '').trim())) {
+            const fileLines = lines.filter(l => !/^total\s+\d+/i.test(l));
+            const names = fileLines.map(l => {
+                const parts = l.split(/\s+/);
+                return parts[parts.length - 1] || l;
+            });
+            const dirCount = fileLines.filter(l => l.startsWith('d')).length;
+            const fileCount = fileLines.filter(l => l.startsWith('-')).length;
+            return {
+                headline: 'I checked the directory contents.',
+                bullets: [
+                    `${dirCount} director${dirCount === 1 ? 'y' : 'ies'} found`,
+                    `${fileCount} file${fileCount === 1 ? '' : 's'} found`,
+                    `Top entries: ${names.slice(0, 8).map(n => '`' + n + '`').join(', ') || 'none'}`
+                ],
+                previewType: 'list',
+                preview: names.slice(0, 25)
+            };
+        }
+
+        if ((trimmed.startsWith('{') || trimmed.startsWith('['))) {
+            try {
+                JSON.parse(trimmed);
+                return {
+                    headline: 'I got structured JSON output from the command.',
+                    bullets: [`${lines.length} line${lines.length === 1 ? '' : 's'} returned`],
+                    previewType: 'json',
+                    preview: trimmed
+                };
+            } catch {}
+        }
+
+        const looksMarkdown = /(^#|\n#|^[-*] |\n[-*] |\*\*|```)/m.test(trimmed);
+        if (looksMarkdown) {
+            return {
+                headline: 'The command returned markdown-formatted content.',
+                bullets: [`${lines.length} line${lines.length === 1 ? '' : 's'} returned`],
+                previewType: 'markdown',
+                preview: trimmed
+            };
+        }
+
+        return {
+            headline: 'The command completed and returned text output.',
+            bullets: [
+                `${lines.length} line${lines.length === 1 ? '' : 's'} returned`,
+                `Previewing first ${Math.min(lines.length, 20)} line${Math.min(lines.length, 20) === 1 ? '' : 's'}`
+            ],
+            previewType: 'text',
+            preview: lines.slice(0, 20).join('\n')
+        };
+    }
+
+    function renderCommandResultHtml(command, output) {
+        const safeCommand = escapeHtml(command || '');
+        const safeOutput = escapeHtml(output || 'No output');
+        const summary = summarizeCommandOutput(command, output);
+
+        return `
+            <div class="tool-inline">
+                <div class="tool-inline-header">
+                    <span class="tool-inline-title">Tool: shell command executed</span>
+                    <span>agent tool result</span>
+                </div>
+                <pre class="tool-inline-command"><code>${safeCommand}</code></pre>
+                <p class="tool-inline-note">${escapeHtml(summary.headline)}</p>
+                <details>
+                    <summary>Show raw output</summary>
+                    <pre class="tool-inline-output"><code>${safeOutput}</code></pre>
+                </details>
+            </div>`;
+    }
+
+    function appendToolResultToCurrentAssistant(command, output) {
+        const toolHtml = renderCommandResultHtml(command, output);
+        if (!currentAiBubble) {
+            appendMessage('', 'assistant');
+            replaceCurrentAiBubbleWithHtml(toolHtml);
+            return;
+        }
+
+        const existing = currentAiBubble.innerHTML || '';
+        currentAiBubble.innerHTML = `${existing}${toolHtml}`;
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
 
     window.copyCodeSnippet = function(elementId) {
@@ -325,7 +661,9 @@ button#send-btn:active{transform:scale(.98);}
         if (!el) return;
         const text = el.innerText;
         navigator.clipboard.writeText(text).then(() => {
-            const btn = el.closest('.code-block-wrapper').querySelector('.copy-btn');
+            const wrapper = el.closest('.md-code-block, .code-block-wrapper');
+            const btn = wrapper ? wrapper.querySelector('.md-copy-btn, .copy-btn') : null;
+            if (!btn) return;
             const original = btn.textContent;
             btn.textContent = 'Copied!';
             setTimeout(() => btn.textContent = original, 1500);
@@ -345,6 +683,12 @@ button#send-btn:active{transform:scale(.98);}
         document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
 
         if (role === 'assistant') currentAiBubble = msgDiv;
+    }
+
+    function appendAssistantRendered(text) {
+        appendMessage('', 'assistant');
+        const rendered = compileMarkdownToHtml(text || '');
+        replaceCurrentAiBubbleWithHtml(rendered);
     }
 
     function replaceCurrentAiBubbleWithHtml(html) {
@@ -378,6 +722,12 @@ button#send-btn:active{transform:scale(.98);}
     const allowDelBtn = document.getElementById('allow-del-btn');
     const denyDelBtn = document.getElementById('deny-del-btn');
 
+    const commandPanel = document.getElementById('command-panel');
+    const commandMsg = document.getElementById('command-msg');
+    const commandShellLabel = document.getElementById('command-shell-label');
+    const allowCmdBtn = document.getElementById('allow-cmd-btn');
+    const denyCmdBtn = document.getElementById('deny-cmd-btn');
+
     const saveDiscardPanel = document.getElementById('save-discard-panel');
     const saveDiscardMsg = document.getElementById('save-discard-msg');
     const keepBtn = document.getElementById('keep-btn');
@@ -385,6 +735,9 @@ button#send-btn:active{transform:scale(.98);}
 
     vscode.postMessage({ type: 'getModels' });
 
+    modelSelect.addEventListener('change', () => {
+        vscode.postMessage({ type: 'saveModelPreference', model: modelSelect.value });
+    });
     newChatBtn.addEventListener('click', () => vscode.postMessage({ type: 'startNewChat' }));
     settingsBtn.addEventListener('click', () => vscode.postMessage({ type: 'openSettings' }));
     backBtn.addEventListener('click', () => {
@@ -396,6 +749,7 @@ button#send-btn:active{transform:scale(.98);}
         messagesDiv.innerHTML = '';
         approvalPanel.style.display = 'none';
         deletePanel.style.display = 'none';
+        commandPanel.style.display = 'none';
         saveDiscardPanel.style.display = 'none';
         vscode.postMessage({ type: 'clearHistory' });
     });
@@ -428,6 +782,14 @@ button#send-btn:active{transform:scale(.98);}
         deletePanel.style.display = 'none';
         vscode.postMessage({ type: 'respondToDelete', action: 'Deny' });
     });
+    allowCmdBtn.addEventListener('click', () => {
+        commandPanel.style.display = 'none';
+        vscode.postMessage({ type: 'respondToCommand', action: 'Allow' });
+    });
+    denyCmdBtn.addEventListener('click', () => {
+        commandPanel.style.display = 'none';
+        vscode.postMessage({ type: 'respondToCommand', action: 'Deny' });
+    });
     keepBtn.addEventListener('click', () => {
         saveDiscardPanel.style.display = 'none';
         vscode.postMessage({ type: 'respondToSaveDiscard', action: 'Keep' });
@@ -445,7 +807,13 @@ button#send-btn:active{transform:scale(.98);}
                 historyScreen.classList.add('hidden');
                 messagesDiv.innerHTML = '';
                 if (msg.mode) modeSelect.value = msg.mode;
-                msg.history.forEach(m => appendMessage(m.content, m.role));
+                msg.history.forEach(m => {
+                    if (m.role === 'assistant') {
+                        appendAssistantRendered(m.content);
+                    } else {
+                        appendMessage(m.content, m.role);
+                    }
+                });
                 break;
             }
             case 'renderSessions': {
@@ -481,6 +849,9 @@ button#send-btn:active{transform:scale(.98);}
                     opt.textContent = m;
                     modelSelect.appendChild(opt);
                 });
+                if (msg.savedModel) {
+                    modelSelect.value = msg.savedModel;
+                }
                 break;
             }
             case 'startStream': {
@@ -495,8 +866,15 @@ button#send-btn:active{transform:scale(.98);}
                 break;
             }
             case 'assistantResponse': {
-                const rendered = compileMarkdownToHtml(msg.content);
-                replaceCurrentAiBubbleWithHtml(rendered);
+                const rendered = compileMarkdownToHtml(msg.content || '');
+                if (!rendered.trim()) {
+                    if (currentAiBubble && currentAiBubble.parentElement) {
+                        currentAiBubble.parentElement.removeChild(currentAiBubble);
+                    }
+                    currentAiBubble = null;
+                } else {
+                    replaceCurrentAiBubbleWithHtml(rendered);
+                }
                 break;
             }
             case 'requestEditApproval': {
@@ -509,9 +887,20 @@ button#send-btn:active{transform:scale(.98);}
                 deletePanel.style.display = 'flex';
                 break;
             }
+            case 'requestCommandApproval': {
+                const commandText = String(msg.command || '').trim();
+                commandMsg.textContent = commandText || 'No command provided';
+                commandShellLabel.textContent = (commandText.startsWith('pwsh') || commandText.startsWith('powershell')) ? 'pwsh' : 'bash';
+                commandPanel.style.display = 'flex';
+                break;
+            }
             case 'showSaveDiscardPanel': {
                 saveDiscardMsg.textContent = (msg.msgType === 'delete' ? 'Deleted ' : 'Modified ') + msg.filename + '. Commit changes?';
                 saveDiscardPanel.style.display = 'flex';
+                break;
+            }
+            case 'commandResult': {
+                appendToolResultToCurrentAssistant(msg.command, msg.output);
                 break;
             }
         }
