@@ -1,0 +1,50 @@
+name: Plugin Showcase
+description: Share a community plugin idea or implementation
+labels: [ plugin, showcase ]
+body:
+- type: markdown
+  attributes:
+    value: |
+      Share your plugin with the community.
+
+- type: input
+  id: plugin-name
+  attributes:
+    label: Plugin Name
+    placeholder: e.g. SQL Explain Tool
+  validations:
+    required: true
+
+- type: dropdown
+  id: plugin-type
+  attributes:
+    label: Plugin Type
+    options:
+    - tool
+    - resource
+    - skill
+  validations:
+    required: true
+
+- type: textarea
+  id: plugin-purpose
+  attributes:
+    label: What it does
+    description: Briefly explain the plugin purpose and value
+  validations:
+    required: true
+
+- type: textarea
+  id: usage
+  attributes:
+    label: Example Usage
+    description: Command examples or interaction flow
+    placeholder: |
+      /tool my-plugin {"path":"..."}
+    render: shell
+
+- type: textarea
+  id: code-link
+  attributes:
+    label: Repo/Gist Link (optional)
+    placeholder: URL to plugin source

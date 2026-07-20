@@ -4,6 +4,10 @@ import * as fs from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { showProviderSelector } from './providers';
+import { PluginRegistry } from './plugins/pluginRegistry';
+import { readFileTool, writeFileTool, deleteFileTool } from './plugins/builtIn/fileTools';
+import { semanticSearchTool, grepSearchTool, workspaceFilesResource } from './plugins/builtIn/searchTools';
+import { runCommandTool, openFileTool } from './plugins/builtIn/terminalTools';
 
 const execAsync = promisify(exec);
 
@@ -27,6 +31,7 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
     private _pendingDelete: { relativePath: string } | null = null;
     private _pendingCommand: { command: string } | null = null;
     private _lastFileSnapshot: { relativePath: string; originalContent: string; isDeletion: boolean } | null = null;
+    private _pluginRegistry?: PluginRegistry;
 
     constructor(
         private readonly _context: vscode.ExtensionContext
@@ -104,6 +109,49 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
         return this._chatHistory.filter(m => m.role !== 'system' && !this._isInternalToolHistory(m.content));
     }
 
+    private _trimHistoryForPayload(history: ChatMessage[], maxMessages: number = 24, maxChars: number = 24000): ChatMessage[] {
+        const recent = history.slice(-maxMessages);
+        const selected: ChatMessage[] = [];
+        let charCount = 0;
+
+        for (let i = recent.length - 1; i >= 0; i--) {
+            const msg = recent[i];
+            const nextSize = msg.content.length;
+            if (charCount + nextSize > maxChars) {
+                break;
+            }
+            selected.unshift(msg);
+            charCount += nextSize;
+        }
+
+        return selected;
+    }
+
+    private async _buildWorkspaceContextSummary(): Promise<string> {
+        const maxFiles = 120;
+        const files = await vscode.workspace.findFiles(
+            '**/*',
+            '**/{node_modules,.git,dist,out,build,.next,target,venv,.venv,.cache}/**',
+            maxFiles + 1
+        );
+
+        const hasMore = files.length > maxFiles;
+        const visibleFiles = files.slice(0, maxFiles).map(f => vscode.workspace.asRelativePath(f));
+        let summary = visibleFiles.join(', ');
+
+        if (summary.length > 6000) {
+            summary = `${summary.slice(0, 6000)} ...`;
+        }
+
+        if (!summary) {
+            return 'No files detected.';
+        }
+
+        return hasMore
+            ? `${summary} (and more files omitted for brevity)`
+            : summary;
+    }
+
     private _sanitizeAgentDisplayResponse(response: string): string {
         return response
             .replace(/<write_file\s+path=["'][^"']+["']\s*>[\s\S]*?<\/write_file>/gi, '')
@@ -172,7 +220,7 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
 
     private async _generateModelResponseFromTool(selectedModel: string, command: string, output: string): Promise<string> {
         const toolPrompt = `Tool execution completed.\nCommand: ${command}\nOutput:\n${output || '(no output)'}\n\nNow answer the user's last request using this tool result. Be concise and helpful. Do not output any tool tags.`;
-        const modelHistory = this._historyForModel();
+        const modelHistory = this._trimHistoryForPayload(this._historyForModel());
         const payload: ChatMessage[] = [
             { role: 'system', content: 'You are Continued, an elite AI coding assistant. Use the provided tool output to answer the user.' },
             ...modelHistory,
@@ -380,6 +428,525 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
         return [...new Set(modelNames)];
     }
 
+    private async _initializePlugins() {
+        const workspaceId = this._workspaceScopeId();
+        this._pluginRegistry = new PluginRegistry(this._context, workspaceId);
+        
+        // Register built-in tools
+        this._pluginRegistry.registerTool(readFileTool);
+        this._pluginRegistry.registerTool(writeFileTool);
+        this._pluginRegistry.registerTool(deleteFileTool);
+        this._pluginRegistry.registerTool(semanticSearchTool);
+        this._pluginRegistry.registerTool(grepSearchTool);
+        this._pluginRegistry.registerTool(runCommandTool);
+        this._pluginRegistry.registerTool(openFileTool);
+        
+        // Register built-in resources
+        this._pluginRegistry.registerResource(workspaceFilesResource);
+        
+        // Load user-defined plugins from .continued/plugins/
+        await this._loadUserPlugins();
+    }
+
+    private async _loadUserPlugins() {
+        if (!this._pluginRegistry) { return; }
+        
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) { return; }
+        
+        const pluginDir = vscode.Uri.joinPath(folders[0].uri, '.continued', 'plugins');
+        
+        try {
+            const files = await vscode.workspace.fs.readDirectory(pluginDir);
+            for (const [name, fileType] of files) {
+                if (fileType === vscode.FileType.File && (name.endsWith('.ts') || name.endsWith('.js'))) {
+                    try {
+                        const pluginPath = vscode.Uri.joinPath(pluginDir, name).fsPath;
+                        // Dynamically load the module
+                        const moduleUrl = require.resolve(pluginPath);
+                        delete require.cache[moduleUrl];
+                        const module = require(moduleUrl);
+                        
+                        // Register any exported plugins
+                        if (module.tool) { this._pluginRegistry.registerTool(module.tool); }
+                        if (module.resource) { this._pluginRegistry.registerResource(module.resource); }
+                        if (module.skill) { this._pluginRegistry.registerSkill(module.skill); }
+                    } catch (e) {
+                        console.warn(`Failed to load user plugin ${name}:`, (e as Error).message);
+                    }
+                }
+            }
+        } catch (e) {
+            // No user plugins directory—skip silently
+        }
+    }
+
+        private _pluginTypeTemplate(pluginType: 'tool' | 'resource' | 'skill', pluginId: string, displayName: string): string {
+                if (pluginType === 'resource') {
+                        return `/**
+ * Continued user plugin template
+ * Type: resource
+ * File: ${pluginId}.js
+ */
+
+module.exports.resource = {
+    id: '${pluginId}',
+    name: '${displayName}',
+    version: '1.0.0',
+    author: 'Your Name',
+    description: 'Describe the context this resource provides',
+    enabled: false,
+    source: 'user',
+    async fetch() {
+        return {
+            success: true,
+            message: 'Replace this with resource data.',
+        };
+    },
+};
+`;
+                }
+
+                if (pluginType === 'skill') {
+                        return `/**
+ * Continued user plugin template
+ * Type: skill
+ * File: ${pluginId}.js
+ */
+
+module.exports.skill = {
+    id: '${pluginId}',
+    name: '${displayName}',
+    version: '1.0.0',
+    author: 'Your Name',
+    description: 'Describe the workflow this skill orchestrates',
+    enabled: false,
+    source: 'user',
+    steps: [],
+    async execute() {
+        return {
+            success: true,
+            message: 'Replace this with skill orchestration logic.',
+        };
+    },
+};
+`;
+                }
+
+                return `/**
+ * Continued user plugin template
+ * Type: tool
+ * File: ${pluginId}.js
+ */
+
+module.exports.tool = {
+    id: '${pluginId}',
+    name: '${displayName}',
+    version: '1.0.0',
+    author: 'Your Name',
+    description: 'Describe what this tool does',
+    enabled: false,
+    source: 'user',
+    async execute(args) {
+        return {
+            success: true,
+            args,
+            message: 'Replace this with your tool logic.',
+        };
+    },
+};
+`;
+        }
+
+        private async _createUserPlugin(pluginType: 'tool' | 'resource' | 'skill', pluginName: string) {
+                const folders = vscode.workspace.workspaceFolders;
+                if (!folders || folders.length === 0) {
+                        throw new Error('Open a workspace folder before creating a plugin.');
+                }
+
+                const safeName = pluginName
+                        .trim()
+                        .toLowerCase()
+                        .replace(/[^a-z0-9_-]+/g, '-')
+                        .replace(/^-+|-+$/g, '') || 'my-plugin';
+
+                const pluginId = `${safeName}-${pluginType}`;
+                const pluginDir = vscode.Uri.joinPath(folders[0].uri, '.continued', 'plugins');
+                await vscode.workspace.fs.createDirectory(pluginDir);
+
+                const pluginFile = vscode.Uri.joinPath(pluginDir, `${pluginId}.js`);
+                const template = this._pluginTypeTemplate(pluginType, pluginId, pluginName.trim() || 'My Plugin');
+                const encoded = new TextEncoder().encode(template);
+
+                await vscode.workspace.fs.writeFile(pluginFile, encoded);
+
+                const doc = await vscode.workspace.openTextDocument(pluginFile);
+                await vscode.window.showTextDocument(doc, { preview: false });
+
+                await this._loadUserPlugins();
+                if (this._view) {
+                        this._view.webview.postMessage({
+                                type: 'setPlugins',
+                                plugins: this._pluginRegistry?.getAllPlugins(),
+                                enabledCount: this._pluginRegistry?.getEnabledCount() ?? 0
+                        });
+                }
+
+                return pluginFile.fsPath;
+        }
+
+    private async _findUserPluginFileById(pluginId: string): Promise<vscode.Uri> {
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) {
+            throw new Error('Open a workspace folder before managing plugins.');
+        }
+
+        const pluginDir = vscode.Uri.joinPath(folders[0].uri, '.continued', 'plugins');
+        const entries = await vscode.workspace.fs.readDirectory(pluginDir);
+        const pluginFiles = entries.filter(([name, fileType]) => {
+            return fileType === vscode.FileType.File && (name.endsWith('.js') || name.endsWith('.ts'));
+        });
+
+        let targetName = pluginFiles.find(([name]) => {
+            const base = name.replace(/\.(js|ts)$/i, '');
+            return base === pluginId;
+        })?.[0];
+
+        if (!targetName) {
+            for (const [name] of pluginFiles) {
+                try {
+                    const fileUri = vscode.Uri.joinPath(pluginDir, name);
+                    const raw = await vscode.workspace.fs.readFile(fileUri);
+                    const content = new TextDecoder().decode(raw);
+                    const idRegex = /\bid\s*:\s*['\"]([^'\"]+)['\"]/;
+                    const match = content.match(idRegex);
+                    if (match && match[1] === pluginId) {
+                        targetName = name;
+                        break;
+                    }
+                } catch {
+                    // Skip unreadable plugin files.
+                }
+            }
+        }
+
+        if (!targetName) {
+            throw new Error(`Could not find plugin file for '${pluginId}' in .continued/plugins/.`);
+        }
+
+        return vscode.Uri.joinPath(pluginDir, targetName);
+    }
+
+    private async _openUserPluginForEdit(pluginId: string) {
+        const targetUri = await this._findUserPluginFileById(pluginId);
+        const doc = await vscode.workspace.openTextDocument(targetUri);
+        await vscode.window.showTextDocument(doc, { preview: false });
+    }
+
+    private _sanitizePluginId(rawValue: string): string {
+        const value = String(rawValue || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9._-]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        return value || 'my-plugin';
+    }
+
+    private _replacePluginMeta(content: string, nextId: string, nextName: string): string {
+        let updated = content;
+        updated = updated.replace(/(\bid\s*:\s*['"])[^'"]+(['"])/, `$1${nextId}$2`);
+        updated = updated.replace(/(\bname\s*:\s*['"])[^'"]+(['"])/, `$1${nextName}$2`);
+        return updated;
+    }
+
+    private async _openPluginsFolder() {
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) {
+            throw new Error('Open a workspace folder before managing plugins.');
+        }
+
+        const pluginDir = vscode.Uri.joinPath(folders[0].uri, '.continued', 'plugins');
+        await vscode.workspace.fs.createDirectory(pluginDir);
+
+        try {
+            await vscode.commands.executeCommand('revealInExplorer', pluginDir);
+        } catch {
+            await vscode.commands.executeCommand('revealFileInOS', pluginDir);
+        }
+    }
+
+    private async _duplicateUserPlugin(pluginId: string, duplicateName?: string, duplicateId?: string) {
+        const sourceUri = await this._findUserPluginFileById(pluginId);
+        const raw = await vscode.workspace.fs.readFile(sourceUri);
+        const sourceContent = new TextDecoder().decode(raw);
+
+        const ext = path.extname(sourceUri.fsPath) || '.js';
+        const baseType = pluginId.endsWith('-resource') ? 'resource' : pluginId.endsWith('-skill') ? 'skill' : 'tool';
+        const targetName = (duplicateName || `${pluginId} copy`).trim();
+        let targetId = this._sanitizePluginId(duplicateId || `${pluginId}-copy`);
+        if (!targetId.endsWith(`-${baseType}`)) {
+            targetId = `${targetId}-${baseType}`;
+        }
+
+        const pluginDir = sourceUri.with({ path: sourceUri.path.replace(/\/[^/]+$/, '') });
+        let targetUri = vscode.Uri.joinPath(pluginDir, `${targetId}${ext}`);
+        let suffix = 1;
+        while (true) {
+            try {
+                await vscode.workspace.fs.stat(targetUri);
+                targetUri = vscode.Uri.joinPath(pluginDir, `${targetId}-${suffix}${ext}`);
+                suffix += 1;
+            } catch {
+                break;
+            }
+        }
+
+        const finalId = path.basename(targetUri.fsPath, ext);
+        const duplicatedContent = this._replacePluginMeta(sourceContent, finalId, targetName);
+        await vscode.workspace.fs.writeFile(targetUri, new TextEncoder().encode(duplicatedContent));
+
+        await this._loadUserPlugins();
+        if (this._view) {
+            this._view.webview.postMessage({
+                type: 'setPlugins',
+                plugins: this._pluginRegistry?.getAllPlugins(),
+                enabledCount: this._pluginRegistry?.getEnabledCount() ?? 0
+            });
+        }
+
+        const doc = await vscode.workspace.openTextDocument(targetUri);
+        await vscode.window.showTextDocument(doc, { preview: false });
+    }
+
+    private async _renameUserPlugin(pluginId: string, nextPluginId: string, nextPluginName: string) {
+        const targetUri = await this._findUserPluginFileById(pluginId);
+        const oldTool = this._pluginRegistry?.getTool(pluginId);
+        const oldResource = this._pluginRegistry?.getResource(pluginId);
+        const oldSkill = this._pluginRegistry?.getSkill(pluginId);
+        const wasEnabled = Boolean(oldTool?.enabled || oldResource?.enabled || oldSkill?.enabled);
+
+        const raw = await vscode.workspace.fs.readFile(targetUri);
+        const sourceContent = new TextDecoder().decode(raw);
+
+        const ext = path.extname(targetUri.fsPath) || '.js';
+        const normalizedId = this._sanitizePluginId(nextPluginId || pluginId);
+        const normalizedName = (nextPluginName || '').trim() || nextPluginId || pluginId;
+        const updatedContent = this._replacePluginMeta(sourceContent, normalizedId, normalizedName);
+
+        let destinationUri = targetUri;
+        const currentBase = path.basename(targetUri.fsPath, ext);
+        if (currentBase !== normalizedId) {
+            destinationUri = vscode.Uri.joinPath(targetUri.with({ path: targetUri.path.replace(/\/[^/]+$/, '') }), `${normalizedId}${ext}`);
+            try {
+                await vscode.workspace.fs.stat(destinationUri);
+                throw new Error(`A plugin file named '${normalizedId}${ext}' already exists.`);
+            } catch (e: any) {
+                if (e && e.code !== 'FileNotFound') {
+                    throw e;
+                }
+            }
+        }
+
+        await vscode.workspace.fs.writeFile(destinationUri, new TextEncoder().encode(updatedContent));
+        if (destinationUri.toString() !== targetUri.toString()) {
+            try {
+                await vscode.workspace.fs.delete(targetUri, { useTrash: true });
+            } catch {
+                await vscode.workspace.fs.delete(targetUri, { useTrash: false });
+            }
+        }
+
+        if (this._pluginRegistry) {
+            await this._pluginRegistry.removePlugin(pluginId);
+        }
+
+        await this._loadUserPlugins();
+
+        if (wasEnabled && this._pluginRegistry) {
+            await this._pluginRegistry.togglePlugin(normalizedId, true);
+        }
+
+        if (this._view) {
+            this._view.webview.postMessage({
+                type: 'setPlugins',
+                plugins: this._pluginRegistry?.getAllPlugins(),
+                enabledCount: this._pluginRegistry?.getEnabledCount() ?? 0
+            });
+        }
+
+        const doc = await vscode.workspace.openTextDocument(destinationUri);
+        await vscode.window.showTextDocument(doc, { preview: false });
+    }
+
+    private async _deleteUserPlugin(pluginId: string) {
+        const targetUri = await this._findUserPluginFileById(pluginId);
+        try {
+            await vscode.workspace.fs.delete(targetUri, { useTrash: true });
+        } catch {
+            // Fallback for environments where trash is unavailable.
+            await vscode.workspace.fs.delete(targetUri, { useTrash: false });
+        }
+
+        if (this._pluginRegistry) {
+            await this._pluginRegistry.removePlugin(pluginId);
+        }
+
+        await this._loadUserPlugins();
+
+        if (this._view) {
+            this._view.webview.postMessage({
+                type: 'setPlugins',
+                plugins: this._pluginRegistry?.getAllPlugins(),
+                enabledCount: this._pluginRegistry?.getEnabledCount() ?? 0
+            });
+        }
+
+        vscode.window.showInformationMessage(`Plugin '${pluginId}' deleted successfully.`);
+    }
+
+    private _formatPluginExecutionResult(result: any): string {
+        if (result === undefined) {
+            return 'Done.';
+        }
+
+        if (typeof result === 'string') {
+            return result;
+        }
+
+        try {
+            return `\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
+        } catch {
+            return String(result);
+        }
+    }
+
+    private _persistSessionAfterLocalReply(userPrompt: string, mode: string) {
+        const allSessions = this._getAllSessions();
+        const idx = allSessions.findIndex(s => s.id === this._currentSessionId);
+        if (idx !== -1) {
+            allSessions[idx].history = this._chatHistory;
+            allSessions[idx].mode = mode;
+        } else {
+            allSessions.unshift({
+                id: this._currentSessionId!,
+                title: userPrompt.length > 28 ? userPrompt.substring(0, 25) + '...' : userPrompt,
+                history: this._chatHistory,
+                mode
+            });
+        }
+        this._saveSessions(allSessions);
+        this._setScopedState('continued_last_session_id', this._currentSessionId!);
+    }
+
+    private async _tryHandlePluginChatCommand(userPrompt: string, mode: string, webviewView: vscode.WebviewView): Promise<boolean> {
+        const trimmed = String(userPrompt || '').trim();
+        if (!trimmed.startsWith('/')) {
+            return false;
+        }
+
+        if (!this._pluginRegistry) {
+            const message = 'Plugin system is not ready yet. Please try again.';
+            webviewView.webview.postMessage({ type: 'assistantResponse', content: message });
+            this._chatHistory.push({ role: 'assistant', content: message });
+            this._persistSessionAfterLocalReply(userPrompt, mode);
+            return true;
+        }
+
+        if (/^\/plugins$/i.test(trimmed)) {
+            const enabledTools = this._pluginRegistry.getEnabledTools().map(t => `- tool: ${t.id}`);
+            const enabledResources = this._pluginRegistry.getEnabledResources().map(r => `- resource: ${r.id}`);
+            const enabledSkills = this._pluginRegistry.getEnabledSkills().map(s => `- skill: ${s.id}`);
+            const lines = [
+                'Enabled plugins:',
+                ...(enabledTools.length ? enabledTools : ['- tool: (none)']),
+                ...(enabledResources.length ? enabledResources : ['- resource: (none)']),
+                ...(enabledSkills.length ? enabledSkills : ['- skill: (none)']),
+                '',
+                'Use:',
+                '- /tool <plugin-id> {"arg":"value"}',
+                '- /resource <plugin-id>',
+                '- /skill <plugin-id> {"arg":"value"}'
+            ];
+            const message = lines.join('\n');
+            webviewView.webview.postMessage({ type: 'assistantResponse', content: message });
+            this._chatHistory.push({ role: 'assistant', content: message });
+            this._persistSessionAfterLocalReply(userPrompt, mode);
+            return true;
+        }
+
+        const match = trimmed.match(/^\/(tool|resource|skill)\s+([a-zA-Z0-9._-]+)(?:\s+([\s\S]+))?$/i);
+        if (!match) {
+            return false;
+        }
+
+        const kind = match[1].toLowerCase();
+        const pluginId = match[2];
+        const rawArgs = (match[3] || '').trim();
+
+        let parsedArgs: any = {};
+        if (rawArgs) {
+            try {
+                parsedArgs = JSON.parse(rawArgs);
+            } catch {
+                parsedArgs = { input: rawArgs };
+            }
+        }
+
+        try {
+            if (kind === 'tool') {
+                const tool = this._pluginRegistry.getTool(pluginId);
+                if (!tool) {
+                    throw new Error(`Tool not found: ${pluginId}`);
+                }
+                if (!tool.enabled) {
+                    throw new Error(`Tool '${pluginId}' is disabled. Enable it in Plugin Manager first.`);
+                }
+                const result = await tool.execute(parsedArgs);
+                const message = `Tool '${pluginId}' executed.${this._formatPluginExecutionResult(result)}`;
+                webviewView.webview.postMessage({ type: 'assistantResponse', content: message });
+                this._chatHistory.push({ role: 'assistant', content: message });
+                this._persistSessionAfterLocalReply(userPrompt, mode);
+                return true;
+            }
+
+            if (kind === 'resource') {
+                const resource = this._pluginRegistry.getResource(pluginId);
+                if (!resource) {
+                    throw new Error(`Resource not found: ${pluginId}`);
+                }
+                if (!resource.enabled) {
+                    throw new Error(`Resource '${pluginId}' is disabled. Enable it in Plugin Manager first.`);
+                }
+                const result = await resource.fetch();
+                const message = `Resource '${pluginId}' fetched.${this._formatPluginExecutionResult(result)}`;
+                webviewView.webview.postMessage({ type: 'assistantResponse', content: message });
+                this._chatHistory.push({ role: 'assistant', content: message });
+                this._persistSessionAfterLocalReply(userPrompt, mode);
+                return true;
+            }
+
+            const skill = this._pluginRegistry.getSkill(pluginId);
+            if (!skill) {
+                throw new Error(`Skill not found: ${pluginId}`);
+            }
+            if (!skill.enabled) {
+                throw new Error(`Skill '${pluginId}' is disabled. Enable it in Plugin Manager first.`);
+            }
+            const result = await skill.execute();
+            const message = `Skill '${pluginId}' executed.${this._formatPluginExecutionResult(result)}`;
+            webviewView.webview.postMessage({ type: 'assistantResponse', content: message });
+            this._chatHistory.push({ role: 'assistant', content: message });
+            this._persistSessionAfterLocalReply(userPrompt, mode);
+            return true;
+        } catch (error) {
+            const message = `Plugin command failed: ${(error as Error).message}`;
+            webviewView.webview.postMessage({ type: 'assistantResponse', content: message });
+            this._chatHistory.push({ role: 'assistant', content: message });
+            this._persistSessionAfterLocalReply(userPrompt, mode);
+            return true;
+        }
+    }
+
     public async resolveWebviewView(
         webviewView: vscode.WebviewView,
         _context: vscode.WebviewViewResolveContext,
@@ -402,6 +969,9 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
         // htmlContent = htmlContent.replace(/\{\{PLACEHOLDER\}\}/g, 'value');
         
         webviewView.webview.html = htmlContent;
+
+        // Initialize plugins
+        await this._initializePlugins();
 
         webviewView.webview.onDidReceiveMessage(async (data) => {
             const sessions = this._getAllSessions();
@@ -497,6 +1067,128 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
 
+                case 'getPlugins': {
+                    if (this._pluginRegistry) {
+                        const allPlugins = this._pluginRegistry.getAllPlugins();
+                        webviewView.webview.postMessage({
+                            type: 'setPlugins',
+                            plugins: allPlugins,
+                            enabledCount: this._pluginRegistry.getEnabledCount()
+                        });
+                    }
+                    break;
+                }
+
+                case 'togglePlugin': {
+                    if (this._pluginRegistry) {
+                        await this._pluginRegistry.togglePlugin(data.pluginId, data.enabled);
+                        const allPlugins = this._pluginRegistry.getAllPlugins();
+                        webviewView.webview.postMessage({
+                            type: 'setPlugins',
+                            plugins: allPlugins,
+                            enabledCount: this._pluginRegistry.getEnabledCount()
+                        });
+                    }
+                    break;
+                }
+
+                case 'createPlugin': {
+                    try {
+                        const rawName = String(data.pluginName || '').trim();
+                        const rawType = String(data.pluginType || 'tool').trim().toLowerCase();
+                        const pluginType = rawType === 'resource' || rawType === 'skill' ? rawType : 'tool';
+                        const pluginName = rawName || 'My Plugin';
+                        await this._createUserPlugin(pluginType, pluginName);
+                        webviewView.webview.postMessage({
+                            type: 'setPlugins',
+                            plugins: this._pluginRegistry?.getAllPlugins(),
+                            enabledCount: this._pluginRegistry?.getEnabledCount() ?? 0
+                        });
+                    } catch (error) {
+                        vscode.window.showErrorMessage(`Could not create plugin: ${(error as Error).message}`);
+                    }
+                    break;
+                }
+
+                case 'editPlugin': {
+                    try {
+                        const pluginId = String(data.pluginId || '').trim();
+                        if (!pluginId) {
+                            throw new Error('Plugin ID is required.');
+                        }
+                        await this._openUserPluginForEdit(pluginId);
+                    } catch (error) {
+                        vscode.window.showErrorMessage(`Could not open plugin for editing: ${(error as Error).message}`);
+                    }
+                    break;
+                }
+
+                case 'openPluginsFolder': {
+                    try {
+                        await this._openPluginsFolder();
+                    } catch (error) {
+                        vscode.window.showErrorMessage(`Could not open plugins folder: ${(error as Error).message}`);
+                    }
+                    break;
+                }
+
+                case 'duplicatePlugin': {
+                    try {
+                        const pluginId = String(data.pluginId || '').trim();
+                        const duplicateName = String(data.duplicateName || '').trim();
+                        const duplicateId = String(data.duplicateId || '').trim();
+                        if (!pluginId) {
+                            throw new Error('Plugin ID is required.');
+                        }
+                        await this._duplicateUserPlugin(pluginId, duplicateName, duplicateId);
+                    } catch (error) {
+                        vscode.window.showErrorMessage(`Could not duplicate plugin: ${(error as Error).message}`);
+                    }
+                    break;
+                }
+
+                case 'renamePlugin': {
+                    try {
+                        const pluginId = String(data.pluginId || '').trim();
+                        const nextPluginId = String(data.nextPluginId || '').trim();
+                        const nextPluginName = String(data.nextPluginName || '').trim();
+                        if (!pluginId) {
+                            throw new Error('Plugin ID is required.');
+                        }
+                        if (!nextPluginId) {
+                            throw new Error('New plugin ID is required.');
+                        }
+                        await this._renameUserPlugin(pluginId, nextPluginId, nextPluginName);
+                    } catch (error) {
+                        vscode.window.showErrorMessage(`Could not rename plugin: ${(error as Error).message}`);
+                    }
+                    break;
+                }
+
+                case 'deletePlugin': {
+                    try {
+                        const pluginId = String(data.pluginId || '').trim();
+                        const pluginName = String(data.pluginName || pluginId || 'this plugin').trim();
+                        if (!pluginId) {
+                            throw new Error('Plugin ID is required.');
+                        }
+
+                        const choice = await vscode.window.showWarningMessage(
+                            `Delete plugin '${pluginName}'? This will remove its file from .continued/plugins/.`,
+                            { modal: true },
+                            'Delete'
+                        );
+                        if (choice !== 'Delete') {
+                            break;
+                        }
+
+                        await this._deleteUserPlugin(pluginId);
+                    } catch (error) {
+                        vscode.window.showErrorMessage(`Could not delete plugin: ${(error as Error).message}`);
+                    }
+                    break;
+                }
+
                 case 'respondToEdit': {
                     if (data.action === 'Allow' && this._pendingEdit) {
                         await this._applyWorkspaceEdit(this._pendingEdit.relativePath, this._pendingEdit.newContent);
@@ -584,6 +1276,11 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
 
                     this._chatHistory.push({ role: 'user', content: userPrompt });
 
+                    const handledPluginCommand = await this._tryHandlePluginChatCommand(userPrompt, mode, webviewView);
+                    if (handledPluginCommand) {
+                        break;
+                    }
+
                     let systemInstructions = "You are Continued, an elite AI coding assistant. Answer the user's latest query directly.";
 
                     if (mode === 'agent' || mode === 'agent-auto') {
@@ -613,12 +1310,11 @@ Use this only when the task explicitly requires terminal/script execution.
 
 NEVER output internal tokens like [[COMMAND_RESULT]] or [[/COMMAND_RESULT]].`;
 
-                        const files = await vscode.workspace.findFiles('**/*', '**/node_modules/**');
-                        const fileList = files.map(f => vscode.workspace.asRelativePath(f));
-                        systemInstructions += `\n\n[WORKSPACE ENVIRONMENT]: The project currently contains these files: ${fileList.join(', ')}`;
+                        const workspaceSummary = await this._buildWorkspaceContextSummary();
+                        systemInstructions += `\n\n[WORKSPACE ENVIRONMENT]: The project contains these files (truncated): ${workspaceSummary}`;
                     }
 
-                    const modelHistory = this._historyForModel();
+                    const modelHistory = this._trimHistoryForPayload(this._historyForModel());
 
                     const payload: ChatMessage[] = [
                         { role: 'system', content: systemInstructions },

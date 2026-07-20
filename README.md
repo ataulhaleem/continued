@@ -14,6 +14,26 @@
 
 ---
 
+## Community Launch (v1.0.0 Stable)
+
+`v1.0.0` marks Continued's stable, community-oriented plugin platform release.
+
+### What's New
+
+* Extensible plugin system with `tools`, `resources`, and `skills`
+* Built-in plugin suite for file, search, terminal, and workspace context operations
+* Plugin Manager UI with checkbox enable/disable
+* In-UI creation for user plugins under `.continued/plugins/`
+* User plugin actions: `Edit` and `Delete`
+
+### Community First
+
+* Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md)
+* Issue templates are included for bug reports, feature requests, and plugin showcases
+* User plugins are workspace-local and can be versioned with your project
+
+---
+
 ## Workspace Settings & Configurations
 
 Continued allows you to switch between model endpoints directly from the sidebar. Tap the **⚙️ (Settings Gear Icon)** at the top of the panel to bring up the Provider Registration panel.
@@ -44,7 +64,21 @@ This extension contributes the following internal command allocations:
 
 ## Release Notes
 
-## 0.0.5
+## 1.0.0
+
+### Stable Platform Release
+- Introduced the extensible plugin architecture for tools, resources, and skills
+- Added the Plugin Manager UI with checkbox-based enable/disable controls
+- Registered built-in file, search, terminal, and workspace resource plugins
+- Enabled user-defined plugins from `.continued/plugins/` with workspace-scoped persistence
+
+### Documentation
+- Added full plugin architecture, quick start, diagrams, and implementation summary guides
+
+### Stability
+- Continued now ships as a stable extensible agent platform rather than a monolithic chat-only assistant
+
+## 0.0.7
 
 ### Bug Fixes
 - Fixed `continued.refreshModels` command never being registered — saving a cloud provider API key now correctly triggers a model list refresh in the sidebar dropdown

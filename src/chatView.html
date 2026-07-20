@@ -123,6 +123,131 @@ button.control-btn:hover{
     background:var(--vscode-button-secondaryHoverBackground,var(--vscode-list-hoverBackground));
     cursor:pointer;
 }
+
+/* Plugin Manager Styles */
+#plugins-screen {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    gap: 8px;
+}
+.plugins-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: var(--border-radius-md);
+    background: var(--vscode-editor-background);
+}
+.plugins-actions .plugins-hint {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    line-height: 1.35;
+}
+.plugins-actions .plugins-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.plugin-card {
+    background: var(--vscode-keybindingTable-rowsBackground, var(--vscode-textBlockQuote-background));
+    border: 1px solid var(--vscode-widget-border, transparent);
+    border-radius: var(--border-radius-md);
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.plugin-card:hover {
+    border-color: var(--vscode-button-background);
+    background: var(--vscode-list-hoverBackground);
+}
+.plugin-card input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.plugin-card-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-shrink: 0;
+}
+.plugin-action-btn {
+    border: 1px solid var(--vscode-button-border, transparent);
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border-radius: var(--border-radius-sm);
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: filter var(--transition-fast);
+}
+.plugin-action-btn:hover {
+    filter: brightness(1.1);
+}
+.plugin-delete-btn {
+    border: 1px solid var(--vscode-button-border, transparent);
+    background: var(--vscode-errorForeground);
+    color: #ffffff;
+    border-radius: var(--border-radius-sm);
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: filter var(--transition-fast);
+}
+.plugin-delete-btn:hover {
+    filter: brightness(1.1);
+}
+.plugin-rename-row {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.plugin-rename-row input {
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: var(--border-radius-sm);
+    padding: 4px 6px;
+    font-size: 11px;
+    min-width: 140px;
+}
+.plugin-rename-row .plugin-action-btn {
+    padding: 4px 7px;
+}
+.plugin-info {
+    flex-grow: 1;
+    min-width: 0;
+}
+.plugin-name {
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--vscode-foreground);
+    margin: 0 0 2px 0;
+}
+.plugin-desc {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    margin: 0;
+    line-height: 1.3;
+}
+.plugin-source {
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    margin-top: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
 #messages{
     flex-grow:1;
     overflow-y:auto;
@@ -418,6 +543,51 @@ button#send-btn:active{transform:scale(.98);}
     <div id="sessions-list-container"></div>
 </div>
 
+<div id="plugins-screen" class="hidden">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <h3 style="margin: 0; font-size: 14px;">Plugin Manager</h3>
+        <button id="plugins-back-btn" class="control-btn" title="Back">⬅</button>
+    </div>
+    <div class="plugins-actions">
+        <div class="plugins-hint">
+            Create a new tool, resource, or skill plugin in <strong>.continued/plugins/</strong>.
+            New plugins are opened for editing right away.
+        </div>
+        <div class="plugins-buttons">
+            <button id="create-plugin-btn" class="control-btn" title="Create a new plugin" style="background: var(--vscode-button-background); color: var(--vscode-button-foreground); padding: 8px 12px; font-weight: 600; border: none; cursor: pointer; border-radius: 4px; transition: filter 0.15s ease;">➕ Create Plugin</button>
+        </div>
+    </div>
+    <div style="font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 12px;">
+        <span id="plugins-enabled-count">0</span> plugins enabled
+    </div>
+    <div id="plugins-list" style="display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex-grow: 1;"></div>
+</div>
+
+<div id="create-plugin-modal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;">
+    <div style="background: var(--vscode-editor-background); border: 1px solid var(--vscode-input-border); border-radius: 8px; padding: 20px; min-width: 320px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);">
+        <h4 style="margin: 0 0 16px 0; color: var(--vscode-foreground);">Create New Plugin</h4>
+        
+        <div style="margin-bottom: 16px;">
+            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--vscode-foreground);">Plugin Type</label>
+            <select id="plugin-type-select" style="width: 100%; padding: 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px; font-family: inherit; cursor: pointer;">
+                <option value="tool">🔨 Tool</option>
+                <option value="resource">📚 Resource</option>
+                <option value="skill">⭐ Skill</option>
+            </select>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--vscode-foreground);">Plugin Name</label>
+            <input id="plugin-name-input" type="text" placeholder="e.g. My Custom Tool" style="width: 100%; padding: 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px; font-family: inherit; box-sizing: border-box;" />
+        </div>
+        
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+            <button id="plugin-cancel-btn" style="padding: 8px 14px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; border-radius: 4px; cursor: pointer; font-weight: 600; transition: filter 0.15s ease;">Cancel</button>
+            <button id="plugin-create-btn" style="padding: 8px 14px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 4px; cursor: pointer; font-weight: 600; transition: filter 0.15s ease;">Create</button>
+        </div>
+    </div>
+</div>
+
 <div id="chat-container" class="hidden">
     <div id="controls-row">
         <button id="back-btn" class="control-btn" title="Go Back">⬅</button>
@@ -428,6 +598,7 @@ button#send-btn:active{transform:scale(.98);}
             <option value="chat">Chat Mode</option>
         </select>
         <button id="clear-btn" class="control-btn" title="Clear Chat">Clear</button>
+        <button id="plugins-btn" class="control-btn" style="padding:4px 6px;" title="Manage Plugins">🔌</button>
         <button id="settings-btn" class="control-btn" style="padding:4px 6px;" title="Import Cloud Provider">⚙️</button>
     </div>
 
@@ -702,11 +873,23 @@ button#send-btn:active{transform:scale(.98);}
     const sessionsListContainer = document.getElementById('sessions-list-container');
     const newChatBtn = document.getElementById('new-chat-btn');
 
+    const pluginsScreen = document.getElementById('plugins-screen');
+    const pluginsList = document.getElementById('plugins-list');
+    const pluginsEnabledCount = document.getElementById('plugins-enabled-count');
+    const pluginsBackBtn = document.getElementById('plugins-back-btn');
+    const createPluginBtn = document.getElementById('create-plugin-btn');
+    const createPluginModal = document.getElementById('create-plugin-modal');
+    const pluginTypeSelect = document.getElementById('plugin-type-select');
+    const pluginNameInput = document.getElementById('plugin-name-input');
+    const pluginCreateBtn = document.getElementById('plugin-create-btn');
+    const pluginCancelBtn = document.getElementById('plugin-cancel-btn');
+
     const chatContainer = document.getElementById('chat-container');
     const backBtn = document.getElementById('back-btn');
     const sendBtn = document.getElementById('send-btn');
     const clearBtn = document.getElementById('clear-btn');
     const settingsBtn = document.getElementById('settings-btn');
+    const pluginsBtn = document.getElementById('plugins-btn');
     const promptInput = document.getElementById('prompt');
     const messagesDiv = document.getElementById('messages');
     const modelSelect = document.getElementById('model-select');
@@ -733,6 +916,90 @@ button#send-btn:active{transform:scale(.98);}
     const keepBtn = document.getElementById('keep-btn');
     const discardBtn = document.getElementById('discard-btn');
 
+    function renderPlugins(plugins) {
+        pluginsList.innerHTML = '';
+        const categories = ['tools', 'resources', 'skills'];
+        
+        for (const category of categories) {
+            const items = plugins[category] || [];
+            if (items.length === 0) continue;
+            
+            const categoryTitle = document.createElement('div');
+            categoryTitle.style.cssText = 'font-size: 11px; font-weight: 700; margin-top: 8px; letter-spacing: 0.05em; color: var(--vscode-descriptionForeground); text-transform: uppercase;';
+            categoryTitle.textContent = category.charAt(0).toUpperCase() + category.slice(1);
+            pluginsList.appendChild(categoryTitle);
+            
+            for (const plugin of items) {
+                const card = document.createElement('div');
+                card.className = 'plugin-card';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = plugin.enabled;
+                checkbox.addEventListener('change', () => {
+                    vscode.postMessage({
+                        type: 'togglePlugin',
+                        pluginId: plugin.id,
+                        enabled: checkbox.checked
+                    });
+                });
+
+                const info = document.createElement('div');
+                info.className = 'plugin-info';
+                const name = document.createElement('div');
+                name.className = 'plugin-name';
+                name.textContent = `${plugin.name} v${plugin.version}`;
+                
+                const desc = document.createElement('div');
+                desc.className = 'plugin-desc';
+                desc.textContent = plugin.description || '(no description)';
+                
+                const source = document.createElement('div');
+                source.className = 'plugin-source';
+                source.textContent = plugin.source === 'built-in' ? '🔨 Built-in' : '👤 User Plugin';
+                
+                info.appendChild(name);
+                info.appendChild(desc);
+                info.appendChild(source);
+
+                const actions = document.createElement('div');
+                actions.className = 'plugin-card-actions';
+
+                if (plugin.source === 'user') {
+                    const editBtn = document.createElement('button');
+                    editBtn.className = 'plugin-action-btn';
+                    editBtn.textContent = 'Edit';
+                    editBtn.title = 'Open plugin file';
+                    editBtn.addEventListener('click', () => {
+                        vscode.postMessage({
+                            type: 'editPlugin',
+                            pluginId: plugin.id
+                        });
+                    });
+                    actions.appendChild(editBtn);
+
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'plugin-delete-btn';
+                    deleteBtn.textContent = 'Delete';
+                    deleteBtn.title = 'Delete plugin file';
+                    deleteBtn.addEventListener('click', () => {
+                        vscode.postMessage({
+                            type: 'deletePlugin',
+                            pluginId: plugin.id,
+                            pluginName: plugin.name
+                        });
+                    });
+                    actions.appendChild(deleteBtn);
+                }
+                
+                card.appendChild(checkbox);
+                card.appendChild(info);
+                card.appendChild(actions);
+                pluginsList.appendChild(card);
+            }
+        }
+    }
+
     vscode.postMessage({ type: 'getModels' });
 
     modelSelect.addEventListener('change', () => {
@@ -740,6 +1007,62 @@ button#send-btn:active{transform:scale(.98);}
     });
     newChatBtn.addEventListener('click', () => vscode.postMessage({ type: 'startNewChat' }));
     settingsBtn.addEventListener('click', () => vscode.postMessage({ type: 'openSettings' }));
+    pluginsBtn.addEventListener('click', () => {
+        chatContainer.classList.add('hidden');
+        pluginsScreen.classList.remove('hidden');
+        vscode.postMessage({ type: 'getPlugins' });
+    });
+    pluginsBackBtn.addEventListener('click', () => {
+        pluginsScreen.classList.add('hidden');
+        chatContainer.classList.remove('hidden');
+    });
+    createPluginBtn.addEventListener('click', () => {
+        pluginTypeSelect.value = 'tool';
+        pluginNameInput.value = '';
+        pluginNameInput.style.borderColor = '';
+        createPluginModal.classList.remove('hidden');
+        setTimeout(() => pluginNameInput.focus(), 100);
+    });
+    
+    pluginCancelBtn.addEventListener('click', () => {
+        createPluginModal.classList.add('hidden');
+    });
+    
+    pluginCreateBtn.addEventListener('click', () => {
+        const pluginType = pluginTypeSelect.value || 'tool';
+        const pluginName = (pluginNameInput.value || '').trim();
+        
+        if (!pluginName) {
+            pluginNameInput.style.borderColor = 'var(--vscode-inputValidation-errorBorder)';
+            pluginNameInput.focus();
+            return;
+        }
+        
+        createPluginModal.classList.add('hidden');
+        vscode.postMessage({
+            type: 'createPlugin',
+            pluginType,
+            pluginName
+        });
+    });
+    
+    pluginNameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            pluginCreateBtn.click();
+        } else if (e.key === 'Escape') {
+            createPluginModal.classList.add('hidden');
+        }
+    });
+    
+    pluginNameInput.addEventListener('input', () => {
+        pluginNameInput.style.borderColor = '';
+    });
+    
+    createPluginModal.addEventListener('click', (e) => {
+        if (e.target === createPluginModal) {
+            createPluginModal.classList.add('hidden');
+        }
+    });
     backBtn.addEventListener('click', () => {
         chatContainer.classList.add('hidden');
         historyScreen.classList.remove('hidden');
@@ -852,6 +1175,11 @@ button#send-btn:active{transform:scale(.98);}
                 if (msg.savedModel) {
                     modelSelect.value = msg.savedModel;
                 }
+                break;
+            }
+            case 'setPlugins': {
+                renderPlugins(msg.plugins);
+                pluginsEnabledCount.textContent = msg.enabledCount || '0';
                 break;
             }
             case 'startStream': {

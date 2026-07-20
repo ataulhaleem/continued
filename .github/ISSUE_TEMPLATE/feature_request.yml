@@ -1,0 +1,39 @@
+name: Feature Request
+description: Suggest an improvement to Continued
+labels: [ enhancement ]
+body:
+- type: markdown
+  attributes:
+    value: |
+      Thanks for sharing an idea.
+
+- type: textarea
+  id: problem
+  attributes:
+    label: Problem Statement
+    description: What problem are you trying to solve?
+    placeholder: As a user, I want ... because ...
+  validations:
+    required: true
+
+- type: textarea
+  id: proposal
+  attributes:
+    label: Proposed Solution
+    description: What should Continued do?
+    placeholder: Describe the expected UX/behavior
+  validations:
+    required: true
+
+- type: textarea
+  id: alternatives
+  attributes:
+    label: Alternatives Considered
+    placeholder: Any workaround or alternative ideas
+
+- type: textarea
+  id: impact
+  attributes:
+    label: Scope / Impact
+    description: Which area is affected?
+    placeholder: Plugin manager, chat flow, provider integration, docs, etc.
