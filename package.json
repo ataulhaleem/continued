@@ -2,7 +2,7 @@
   "name": "continued",
   "displayName": "continued",
   "description": "drop in replacement for continue.dev",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "AtaUlHaleem",
   "repository": {
     "type": "git",
@@ -39,8 +39,58 @@
       {
         "command": "continued.addProvider",
         "title": "Continued: Add Cloud Provider"
+      },
+      {
+        "command": "continued.refreshModels",
+        "title": "Continued: Refresh Model List"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Continued",
+      "properties": {
+        "continued.ollama.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Base URL of the Ollama server used for local models (chat, agent and inline completion)."
+        },
+        "continued.agent.maxIterations": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "description": "Maximum number of model/tool steps in one agent run before it stops and asks you to continue."
+        },
+        "continued.agent.modelTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 5000,
+          "description": "Timeout in milliseconds for a single model call in agent mode."
+        },
+        "continued.agent.commandTimeoutMs": {
+          "type": "number",
+          "default": 60000,
+          "minimum": 1000,
+          "description": "Timeout in milliseconds for shell commands run by the agent."
+        },
+        "continued.agent.maxContextChars": {
+          "type": "number",
+          "default": 80000,
+          "minimum": 4000,
+          "description": "Character budget for the conversation history sent to the model. Lower this for small local models."
+        },
+        "continued.agent.maxHistoryMessages": {
+          "type": "number",
+          "default": 40,
+          "minimum": 4,
+          "description": "Maximum number of recent messages (including tool results) sent to the model."
+        },
+        "continued.agent.maxToolOutputChars": {
+          "type": "number",
+          "default": 40000,
+          "minimum": 1000,
+          "description": "Maximum characters of a read-file result passed back to the model."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
@@ -54,7 +104,8 @@
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:unit": "npm run compile-tests && mocha --ui tdd out/test/agentActions.test.js out/test/agentGuardrails.test.js out/test/harnessEngine.test.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.90.0",

@@ -1,4 +1,10 @@
-
 node_modules
+continued-web
+media
+example_prompts
+test_file
+versions
 .vscode
+.continued
 dist
+out

@@ -74,15 +74,18 @@ npm run lint
 log "Building extension"
 npm run compile
 
-log "Packaging VSIX"
-npx @vscode/vsce package
+VERSIONS_DIR="$ROOT_DIR/versions"
+mkdir -p "$VERSIONS_DIR"
 
 VERSION="$(node -p "require('./package.json').version")"
-VSIX_FILE="$ROOT_DIR/${EXT_NAME}-${VERSION}.vsix"
+VSIX_FILE="$VERSIONS_DIR/${EXT_NAME}-${VERSION}.vsix"
+
+log "Packaging VSIX into versions/"
+npx @vscode/vsce package --out "$VSIX_FILE"
 
 if [[ ! -f "$VSIX_FILE" ]]; then
-	warn "Expected VSIX not found at ${VSIX_FILE}. Using latest continued-*.vsix in folder."
-	VSIX_FILE="$(ls -t "$ROOT_DIR"/continued-*.vsix 2>/dev/null | head -n1 || true)"
+	warn "Expected VSIX not found at ${VSIX_FILE}. Using latest continued-*.vsix in versions/."
+	VSIX_FILE="$(ls -t "$VERSIONS_DIR"/continued-*.vsix 2>/dev/null | head -n1 || true)"
 fi
 
 [[ -n "${VSIX_FILE:-}" ]] || fail "No VSIX file found after packaging"
