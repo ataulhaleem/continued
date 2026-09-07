@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { getOllamaBaseUrl } from './llmClient';
 
 export class ContinuedCompletionProvider implements vscode.InlineCompletionItemProvider {
 
@@ -190,7 +191,7 @@ export class ContinuedCompletionProvider implements vscode.InlineCompletionItemP
 
             } else {
                 // Ollama — use /api/generate with optional FIM suffix
-                const response = await fetch('http://localhost:11434/api/generate', {
+                const response = await fetch(`${getOllamaBaseUrl()}/api/generate`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
