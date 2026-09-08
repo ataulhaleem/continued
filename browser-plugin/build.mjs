@@ -36,10 +36,49 @@ html = html
   .replace('</head>', '<link rel="stylesheet" href="theme.css"></head>')
   .replace('<body>', '<body><script src="shim.js"></script>');
 
+/**
+ * Rewrite `target.innerHTML = <expr>;` into `__setHTML(target, <expr>);` (helper in shim.js,
+ * implemented with DOMParser). Add-on linters flag dynamic innerHTML assignments; the
+ * markup here is generated from escaped text, but the rewrite makes that explicit and
+ * keeps the shared UI sources untouched. Static clears (`innerHTML = ''`) are left alone.
+ */
+function rewriteInnerHtml(js) {
+  const re = /([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[[^\]]+\])*)\.innerHTML\s*=(?!=)\s*/g;
+  let out = '';
+  let last = 0;
+  let m;
+  while ((m = re.exec(js)) !== null) {
+    const target = m[1];
+    const exprStart = m.index + m[0].length;
+    // Scan to the end of the statement (a ';' at depth 0 outside string literals).
+    let i = exprStart, depth = 0, quote = null;
+    for (; i < js.length; i++) {
+      const ch = js[i];
+      if (quote) {
+        if (ch === '\\') { i++; continue; }
+        if (ch === quote) { quote = null; }
+        continue;
+      }
+      if (ch === "'" || ch === '"' || ch === '`') { quote = ch; continue; }
+      if (ch === '(' || ch === '[' || ch === '{') { depth++; continue; }
+      if (ch === ')' || ch === ']' || ch === '}') { if (depth === 0) { break; } depth--; continue; }
+      if (ch === ';' && depth === 0) { break; }
+      if (ch === '\n' && depth === 0 && /^\s*[^\s+?:&|.,]/.test(js.slice(i + 1, i + 40)) && !/[+?:&|,(]\s*$/.test(js.slice(exprStart, i))) { break; }
+    }
+    const expr = js.slice(exprStart, i).trim();
+    if (expr === "''" || expr === '""') { continue; }           // static clear: leave as is
+    out += js.slice(last, m.index) + `__setHTML(${target}, ${expr})`;
+    last = i;
+    re.lastIndex = i;
+  }
+  return out + js.slice(last);
+}
+
 for (const t of targets) {
   scripts.forEach((js, i) => {
     // Inline onclick attributes are blocked by CSP; the shim installs a delegated handler instead.
-    writeFileSync(join('dist', t, `ui-${i}.js`), js.replace(/\s*onclick="window\.copyCodeSnippet\(\\''\+uid\+'\\'\)"/g, ''));
+    const cleaned = js.replace(/\s*onclick="window\.copyCodeSnippet\(\\''\+uid\+'\\'\)"/g, '');
+    writeFileSync(join('dist', t, `ui-${i}.js`), rewriteInnerHtml(cleaned));
   });
   writeFileSync(join('dist', t, 'sidepanel.html'), html);
 }

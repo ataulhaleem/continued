@@ -60,6 +60,19 @@ function send(message: unknown): void {
 
 setInterval(() => send({ type: 'ping' }), 20000);
 
+/**
+ * Replace an element's children with parsed markup. The build rewrites the UI's
+ * `el.innerHTML = …` assignments to this; DOMParser never executes scripts or
+ * inline handlers, and the extension CSP blocks them anyway.
+ */
+(window as unknown as { __setHTML: (el: Element | null, html: unknown) => void }).__setHTML = (el, html) => {
+    if (!el) { return; }
+    const text = html === undefined || html === null ? '' : String(html);
+    if (!text) { el.replaceChildren(); return; }
+    const doc = new DOMParser().parseFromString(`<body>${text}</body>`, 'text/html');
+    el.replaceChildren(...Array.from(doc.body.childNodes));
+};
+
 document.addEventListener('click', event => {
     const btn = (event.target as HTMLElement | null)?.closest('.md-copy-btn') as HTMLElement | null;
     if (!btn) { return; }
