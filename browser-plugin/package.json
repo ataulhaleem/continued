@@ -1,0 +1,21 @@
+{
+  "name": "continued-browser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Continued for the browser: a local-first AI agent in your Chrome side panel or Firefox sidebar, with a harness builder.",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "check-types": "tsc --noEmit",
+    "zip": "node build.mjs && rm -f continued-chrome-$npm_package_version.zip continued-firefox-$npm_package_version.zip && (cd dist/chrome && zip -qr ../../continued-chrome-$npm_package_version.zip .) && (cd dist/firefox && zip -qr ../../continued-firefox-$npm_package_version.zip .) && echo built continued-chrome-$npm_package_version.zip continued-firefox-$npm_package_version.zip",
+    "source-zip": "rm -f continued-source-$npm_package_version.zip && zip -qr continued-source-$npm_package_version.zip package.json package-lock.json tsconfig.json build.mjs manifest.json README.md PUBLISHING.md src && echo built continued-source-$npm_package_version.zip",
+    "lint:firefox": "npx web-ext lint --source-dir dist/firefox",
+    "firefox": "npx web-ext run --source-dir dist/firefox",
+    "chrome": "echo 'Open chrome://extensions, enable Developer mode, Load unpacked -> browser-plugin/dist/chrome'"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3"
+  }
+}

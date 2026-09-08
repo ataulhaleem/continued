@@ -1,0 +1,108 @@
+/*
+ * Browser theme: maps the --vscode-* variables the sidebar UI uses onto a dark
+ * palette (light palette under prefers-color-scheme: light), plus small
+ * adjustments for things that do not exist in a browser.
+ */
+:root {
+  --vscode-font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --vscode-editor-font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --vscode-font-size: 13px;
+
+  --vscode-editor-background: #0f1117;
+  --vscode-editor-foreground: #e6e9f0;
+  --vscode-foreground: #e6e9f0;
+  --vscode-descriptionForeground: #9aa3b5;
+  --vscode-errorForeground: #ff6b6b;
+  --vscode-editorWarning-foreground: #f6b73c;
+  --vscode-editorError-foreground: #ff6b6b;
+  --vscode-editorInfo-foreground: #6d8bff;
+  --vscode-textLink-foreground: #7c96ff;
+  --vscode-focusBorder: #6d8bff;
+  --vscode-progressBar-background: #6d8bff;
+
+  --vscode-sideBar-background: #0f1117;
+  --vscode-sideBarSectionHeader-background: #151924;
+  --vscode-editorWidget-background: #151924;
+  --vscode-editorWidget-border: #2a3142;
+  --vscode-widget-border: #2a3142;
+  --vscode-panel-border: #2a3142;
+  --vscode-input-background: #0b0d12;
+  --vscode-input-foreground: #e6e9f0;
+  --vscode-input-border: #2a3142;
+  --vscode-input-placeholderForeground: #6b7489;
+  --vscode-inputValidation-errorBackground: #3a1f22;
+  --vscode-inputValidation-errorBorder: #ff6b6b;
+  --vscode-dropdown-background: #151924;
+  --vscode-dropdown-foreground: #e6e9f0;
+  --vscode-dropdown-border: #2a3142;
+
+  --vscode-button-background: #6d8bff;
+  --vscode-button-foreground: #0b0d12;
+  --vscode-button-hoverBackground: #86a0ff;
+  --vscode-button-border: transparent;
+  --vscode-button-secondaryBackground: #232937;
+  --vscode-button-secondaryForeground: #e6e9f0;
+  --vscode-button-secondaryHoverBackground: #2f374a;
+
+  --vscode-badge-background: #2a3142;
+  --vscode-badge-foreground: #e6e9f0;
+  --vscode-list-hoverBackground: #1b2130;
+  --vscode-list-activeSelectionBackground: #24304a;
+  --vscode-toolbar-hoverBackground: #232937;
+  --vscode-keybindingTable-rowsBackground: #151924;
+  --vscode-textBlockQuote-background: #151924;
+  --vscode-textBlockQuote-border: #2a3142;
+  --vscode-textCodeBlock-background: #0b0d12;
+  --vscode-textPreformat-foreground: #f6b73c;
+  --vscode-testing-iconPassed: #4ade80;
+  --vscode-testing-iconErrored: #ff6b6b;
+  --vscode-charts-green: #4ade80;
+  --vscode-charts-red: #ff6b6b;
+  --vscode-charts-yellow: #f6b73c;
+  --vscode-charts-blue: #6d8bff;
+  --vscode-scrollbarSlider-background: rgba(255, 255, 255, 0.12);
+  --vscode-scrollbarSlider-hoverBackground: rgba(255, 255, 255, 0.2);
+  --vscode-notifications-background: #151924;
+  --vscode-notifications-border: #2a3142;
+  --vscode-debugConsole-infoForeground: #6d8bff;
+  --vscode-list-invalidItemForeground: #ff6b6b;
+  --vscode-terminal-ansiBlue: #6d8bff;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --vscode-editor-background: #ffffff;
+    --vscode-editor-foreground: #1f2430;
+    --vscode-foreground: #1f2430;
+    --vscode-descriptionForeground: #5b6577;
+    --vscode-sideBar-background: #ffffff;
+    --vscode-sideBarSectionHeader-background: #f3f5f9;
+    --vscode-editorWidget-background: #f3f5f9;
+    --vscode-editorWidget-border: #d9dee8;
+    --vscode-widget-border: #d9dee8;
+    --vscode-panel-border: #d9dee8;
+    --vscode-input-background: #ffffff;
+    --vscode-input-foreground: #1f2430;
+    --vscode-input-border: #c9d0dd;
+    --vscode-dropdown-background: #ffffff;
+    --vscode-dropdown-foreground: #1f2430;
+    --vscode-button-secondaryBackground: #e4e8f0;
+    --vscode-button-secondaryForeground: #1f2430;
+    --vscode-button-secondaryHoverBackground: #d7dce7;
+    --vscode-badge-background: #e4e8f0;
+    --vscode-badge-foreground: #1f2430;
+    --vscode-list-hoverBackground: #eef1f7;
+    --vscode-toolbar-hoverBackground: #e4e8f0;
+    --vscode-keybindingTable-rowsBackground: #f3f5f9;
+    --vscode-textBlockQuote-background: #f3f5f9;
+    --vscode-textCodeBlock-background: #f0f2f7;
+    --vscode-scrollbarSlider-background: rgba(0, 0, 0, 0.12);
+    --vscode-scrollbarSlider-hoverBackground: rgba(0, 0, 0, 0.2);
+  }
+}
+
+html, body { height: 100%; margin: 0; background: var(--vscode-editor-background); color: var(--vscode-foreground); }
+
+/* Not applicable in the browser build */
+#create-tool-btn, #create-skill-btn, #create-resource-btn, #open-plugins-folder-btn, #harness-open-btn { display: none !important; }
+#current-file-indicator::before { content: "🌐 "; }

@@ -1,0 +1,60 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "116",
+  "name": "Continued",
+  "version": "0.1.0",
+  "description": "A local-first AI agent in your browser sidebar: reads and works with your tabs, runs on Ollama or cloud models, and builds visual workflows.",
+  "homepage_url": "https://github.com/ataulhaleem/continued",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab",
+    "sidePanel",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "action": {
+    "default_title": "Open Continued",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "sidebar_action": {
+    "default_panel": "sidepanel.html",
+    "default_title": "Continued",
+    "open_at_install": true,
+    "default_icon": "icons/icon32.png"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "continued@ataulhaleem.github.io",
+      "strict_min_version": "115.0"
+    }
+  }
+}

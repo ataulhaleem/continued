@@ -20,3 +20,5 @@ test_ppt_generator.js
 .github/**
 vsc-extension-quickstart.md
 !dist/**
+browser-plugin/**
+PRIVACY.md

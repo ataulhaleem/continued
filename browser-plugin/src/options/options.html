@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Continued · Options</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main class="wrap">
+    <h1><span class="mark">C</span> Continued options</h1>
+    <p class="lead">Continued runs entirely in your browser. Prompts and page content go only to the model you select. Nothing else is collected.</p>
+
+    <section>
+      <h2>Local models (Ollama)</h2>
+      <label>Ollama base URL <input id="ollamaBaseUrl" type="text" placeholder="http://localhost:11434" /></label>
+      <p class="hint">Every model on that server appears in the sidebar dropdown. No key needed. Use a LAN address to share a GPU box with your team. <button id="testOllama" class="secondary" type="button">Test connection</button> <span id="ollamaStatus" class="status"></span></p>
+    </section>
+
+    <section>
+      <h2>Cloud providers (optional)</h2>
+      <p class="hint warn">Keys are stored in extension storage on this device, unencrypted. Prefer Ollama for anything sensitive.</p>
+      <label>OpenAI API key <input id="key-openai" type="password" autocomplete="off" /></label>
+      <label>Google Gemini API key <input id="key-gemini" type="password" autocomplete="off" /></label>
+      <label>Anthropic API key <input id="key-anthropic" type="password" autocomplete="off" /></label>
+      <label>Blablador (Helmholtz) token <input id="key-blablador" type="password" autocomplete="off" /></label>
+    </section>
+
+    <section>
+      <h2>Agent</h2>
+      <div class="grid">
+        <label>Max steps per run <input id="maxIterations" type="number" min="1" max="100" /></label>
+        <label>Model timeout (ms) <input id="modelTimeoutMs" type="number" min="5000" step="1000" /></label>
+        <label>Context budget (chars) <input id="maxContextChars" type="number" min="4000" step="1000" /></label>
+      </div>
+      <label class="check"><input id="allowPrivateNetwork" type="checkbox" /> Allow the agent to open and fetch localhost / private-network URLs</label>
+    </section>
+
+    <div class="actions">
+      <button id="save" type="button">Save</button>
+      <button id="showLog" class="secondary" type="button">Show log</button>
+      <span id="saved" class="status"></span>
+    </div>
+    <pre id="log" class="log" hidden></pre>
+
+    <footer>
+      <a href="https://github.com/ataulhaleem/continued" target="_blank" rel="noopener">GitHub</a> ·
+      <a href="https://marketplace.visualstudio.com/items?itemName=AtaUlHaleem.continued" target="_blank" rel="noopener">VS Code extension</a> ·
+      <a href="https://github.com/ataulhaleem/continued/blob/main/PRIVACY.md" target="_blank" rel="noopener">Privacy policy</a>
+    </footer>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>
