@@ -160,7 +160,7 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
     constructor(
         private readonly _context: vscode.ExtensionContext
     ) {
-        this._log = vscode.window.createOutputChannel('Continued');
+        this._log = vscode.window.createOutputChannel('Enclave');
         _context.subscriptions.push(this._log);
         this._llm = new LlmClient(_context.secrets, line => this._log.appendLine(`[${new Date().toISOString()}] ${line}`));
         this._guardrails = this._createGuardrails();
@@ -482,7 +482,7 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
             id: def.id,
             name: def.name,
             version: def.version ?? '1.0.0',
-            author: def.source === 'built-in' ? 'Continued' : 'You',
+            author: def.source === 'built-in' ? 'Enclave' : 'You',
             description: `${def.description ?? ''}${def.input?.label ? ` (input: ${def.input.label})` : ''}`.trim() || def.name,
             enabled: true,
             source: def.source,
@@ -1063,7 +1063,7 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
         if (remembered !== undefined) { return remembered; }
 
         const choice = await vscode.window.showWarningMessage(
-            `Continued found the plugin "${name}" in this workspace's .continued/plugins/ folder.`,
+            `Enclave found the plugin "${name}" in this workspace's .continued/plugins/ folder.`,
             {
                 modal: true,
                 detail: 'Loading it runs its JavaScript with the same access this extension has: your files, '
@@ -1104,7 +1104,7 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
             for (const [name, fileType] of files) {
                 if (fileType !== vscode.FileType.File) {continue;}
                 if (name.endsWith('.ts')) {
-                    console.warn(`Continued: skipping ${name} — user plugins must be plain JavaScript (.js) files.`);
+                    console.warn(`Enclave: skipping ${name} — user plugins must be plain JavaScript (.js) files.`);
                     continue;
                 }
                 if (!name.endsWith('.js') && !name.endsWith('.cjs')) {continue;}
@@ -1125,7 +1125,7 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
                     if (module.skill) { this._pluginRegistry.registerSkill({ ...module.skill, source: 'user' }); }
                 } catch (e) {
                     console.warn(`Failed to load user plugin ${name}:`, (e as Error).message);
-                    vscode.window.showWarningMessage(`Continued: could not load plugin ${name}: ${(e as Error).message}`);
+                    vscode.window.showWarningMessage(`Enclave: could not load plugin ${name}: ${(e as Error).message}`);
                 }
             }
         } catch {
@@ -1145,7 +1145,7 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
         const safeDescription = (description || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, ' ');
         if (pluginType === 'resource') {
             return `/**
- * Continued user plugin
+ * Enclave user plugin
  * Type: resource
  * File: ${pluginId}.js
  *
@@ -1174,7 +1174,7 @@ module.exports.resource = {
 
         if (pluginType === 'skill') {
             return `/**
- * Continued user plugin
+ * Enclave user plugin
  * Type: skill
  * File: ${pluginId}.js
  *
@@ -1207,7 +1207,7 @@ module.exports.skill = {
         }
 
         return `/**
- * Continued user plugin
+ * Enclave user plugin
  * Type: tool
  * File: ${pluginId}.js
  *
@@ -1776,7 +1776,7 @@ module.exports.tool = {
         const root = this._workspaceRoot() ?? '(no workspace folder open)';
         const activeFile = this._agentCurrentFile ? `\nActive editor file: ${this._agentCurrentFile}` : '';
 
-        return `You are Continued, an AI coding agent running inside VS Code.
+        return `You are Enclave, an AI coding agent running inside VS Code.
 
 ## HOW YOU WORK
 You operate in an agentic loop. Each reply is exactly ONE action expressed as a single JSON object.
@@ -2023,7 +2023,7 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
             const displayText = sanitizeAgentDisplayResponse(lastText || lastReasoning);
             const fallback = lastText
                 ? `⚠️ The agent kept replying with text instead of an action, so the run was stopped. Last reply:\n\n${displayText.slice(0, 1500) || '(unprintable)'}`
-                : `⚠️ The model stopped without producing an action ${MAX_CORRECTIONS + 1} times in a row${lastError ? ` (${lastError})` : ''}.${displayText ? `\n\nIts last reasoning was:\n\n> ${displayText.slice(0, 800).replace(/\n/g, '\n> ')}` : ''}\n\nTry again, use a different model, or lower \`continued.agent.maxContextChars\` if the model's context is small. The "Continued" output channel has the raw replies.`;
+                : `⚠️ The model stopped without producing an action ${MAX_CORRECTIONS + 1} times in a row${lastError ? ` (${lastError})` : ''}.${displayText ? `\n\nIts last reasoning was:\n\n> ${displayText.slice(0, 800).replace(/\n/g, '\n> ')}` : ''}\n\nTry again, use a different model, or lower \`continued.agent.maxContextChars\` if the model's context is small. The "Enclave" output channel has the raw replies.`;
             this._finishAgentRun(view, mode, fallback);
             return;
         }
@@ -2509,11 +2509,11 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
 
     private async _runChatTurn(model: string, mode: string, currentFile: string | null, view: vscode.WebviewView) {
         let system = mode === 'plan'
-            ? `You are Continued, an AI coding assistant running inside VS Code, in PLAN mode.
+            ? `You are Enclave, an AI coding assistant running inside VS Code, in PLAN mode.
 Do NOT make changes. Produce a concise, numbered implementation plan for the user's request that another agent can execute step by step.
 For each step name the file(s) to read or modify and describe the change precisely. Mention any commands to run and finish with a short verification step.
 Write plain Markdown. Do not output JSON actions or tool tags.`
-            : "You are Continued, an AI coding assistant running inside VS Code. Answer the user's latest query directly and concisely, using Markdown and fenced code blocks where helpful.";
+            : "You are Enclave, an AI coding assistant running inside VS Code. Answer the user's latest query directly and concisely, using Markdown and fenced code blocks where helpful.";
         if (currentFile) {
             system += `\n\nThe user currently has this file open in the editor: ${currentFile}`;
         }

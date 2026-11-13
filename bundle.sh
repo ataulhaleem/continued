@@ -150,8 +150,8 @@ fi
 CLI_TGZ=""
 if [[ "$BROWSER" == "true" ]]; then
 	log "Building command-line host into artifacts/"
-	(cd cli && npm run check-types && npm run build && mkdir -p "$ARTIFACTS_DIR" && rm -f "$ARTIFACTS_DIR"/enclave-cli-*.tgz && npm pack --pack-destination "$ARTIFACTS_DIR" >/dev/null)
-	CLI_TGZ="$(ls -t "$ARTIFACTS_DIR"/enclave-cli-*.tgz 2>/dev/null | head -n1 || true)"
+	(cd cli && npm run check-types && npm run build && mkdir -p "$ARTIFACTS_DIR" && rm -f "$ARTIFACTS_DIR"/enclave-harness-*.tgz && npm pack --pack-destination "$ARTIFACTS_DIR" >/dev/null)
+	CLI_TGZ="$(ls -t "$ARTIFACTS_DIR"/enclave-harness-*.tgz 2>/dev/null | head -n1 || true)"
 	[[ -n "$CLI_TGZ" ]] || fail "Expected CLI tarball not found in $ARTIFACTS_DIR"
 fi
 

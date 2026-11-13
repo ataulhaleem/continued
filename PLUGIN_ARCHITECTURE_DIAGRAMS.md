@@ -7,7 +7,7 @@
 │                  VS Code Extension Host                     │
 │                                                              │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │          Continued Extension (v0.0.7)               │   │
+│  │          Enclave Extension (v0.0.7)               │   │
 │  │                                                       │   │
 │  │  ┌─────────────────────────────────────────────┐     │   │
 │  │  │   chatViewProvider.ts (Main Extension)      │     │   │

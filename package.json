@@ -1,7 +1,7 @@
 {
   "name": "continued",
-  "displayName": "Continued – Local-first AI Agent (Ollama, Blablador)",
-  "description": "Local-first AI coding agent: chat and agent mode on Ollama models on your machine or an institutional endpoint such as Blablador, every action approval-gated, and reproducible workflow-harnesses exportable to CWL.",
+  "displayName": "Enclave – Local-first AI Agent (formerly Continued)",
+  "description": "Enclave (formerly Continued), a local-first AI coding agent: chat and agent mode on Ollama models on your machine or an institutional endpoint such as Blablador, every action approval-gated, and reproducible workflow-harnesses exportable to CWL.",
   "version": "1.1.0",
   "publisher": "AtaUlHaleem",
   "license": "MIT",
@@ -38,7 +38,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "In an untrusted workspace Continued does not load plugins from .continued/plugins/, because loading one runs its JavaScript in the extension host. Chat, the agent and the built-in plugins all work normally.",
+      "description": "In an untrusted workspace Enclave does not load plugins from .continued/plugins/, because loading one runs its JavaScript in the extension host. Chat, the agent and the built-in plugins all work normally.",
       "restrictedConfigurations": [
         "continued.ollama.baseUrl"
       ]
@@ -49,7 +49,7 @@
       "activitybar": [
         {
           "id": "continued-sidebar",
-          "title": "Continued",
+          "title": "Enclave",
           "icon": "$(comment-discussion)"
         }
       ]
@@ -67,15 +67,15 @@
     "commands": [
       {
         "command": "continued.addProvider",
-        "title": "Continued: Add Cloud Provider"
+        "title": "Enclave: Add Cloud Provider"
       },
       {
         "command": "continued.refreshModels",
-        "title": "Continued: Refresh Model List"
+        "title": "Enclave: Refresh Model List"
       }
     ],
     "configuration": {
-      "title": "Continued",
+      "title": "Enclave",
       "properties": {
         "continued.ollama.baseUrl": {
           "type": "string",

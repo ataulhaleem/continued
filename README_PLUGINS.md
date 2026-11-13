@@ -1,4 +1,4 @@
-# Continued Plugin Architecture - Complete Implementation
+# Enclave Plugin Architecture - Complete Implementation
 
 ## 🎯 Your Request Fulfilled
 
@@ -100,7 +100,7 @@ Example Plugins:          1
 
 ### For End Users
 ```
-1. Open Continued chat
+1. Open Enclave chat
    ↓
 2. Click 🔌 Plugins button
    ↓

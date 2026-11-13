@@ -15,9 +15,7 @@ written down as a **workflow-harness**: a JSON document in which you fix the pro
 consulted only at the steps you declare.
 
 ::callout{type="note" title="Formerly Continued"}
-The project is being renamed from *Continued* to *Enclave*. Store listings, package names and
-folder names are changing over release by release; where a name below still says Continued, it is
-the same software.
+Since release 1.1.0 the project is named *Enclave*. The VS Code extension keeps its Marketplace identifier `AtaUlHaleem.continued`, its `continued.*` settings and the `.continued/` workspace folder, and the Firefox add-on keeps its ID, so existing installs update in place.
 ::
 
 ## Distributions
@@ -27,7 +25,7 @@ the same software.
 | VS Code, VSCodium, Cursor, code-server | `AtaUlHaleem.continued` | [Marketplace](https://marketplace.visualstudio.com/items?itemName=AtaUlHaleem.continued) · [Open VSX](https://open-vsx.org/extension/AtaUlHaleem/continued) |
 | Firefox (sidebar) | `Enclave` | [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/continued/) |
 | Chrome, Edge (side panel) | `Enclave` | Chrome Web Store (pending) · [load unpacked](/browser) |
-| Terminal | `enclave-cli` | `npm install -g ./enclave-cli-<version>.tgz` from a release, or `npx enclave-cli` once published |
+| Terminal | `enclave-harness` | `npm install -g ./enclave-harness-<version>.tgz` from a release, or `npx enclave-harness` once published |
 
 All four share one core: the harness engine, the document format, the exporters and the user
 interface. What differs is what the agent acts on: files and terminals in the editor, tabs in the

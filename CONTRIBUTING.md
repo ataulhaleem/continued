@@ -1,6 +1,6 @@
-# Contributing to Continued
+# Contributing to Enclave
 
-Thanks for helping improve Continued.
+Thanks for helping improve Enclave (formerly Continued).
 
 ## Quick Start
 
@@ -22,7 +22,7 @@ Thanks for helping improve Continued.
 
 ## Plugin System Contributions
 
-Continued supports community plugins under `.continued/plugins/` using:
+Enclave supports community plugins under `.continued/plugins/` using:
 
 - `tool` plugins (`execute(args)`)
 - `resource` plugins (`fetch()`)

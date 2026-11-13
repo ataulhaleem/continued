@@ -1,4 +1,6 @@
-# Continued
+# Enclave
+
+*formerly Continued*
 
 [![VS Marketplace](https://img.shields.io/visual-studio-marketplace/v/AtaUlHaleem.continued?label=VS%20Marketplace&color=6d8bff)](https://marketplace.visualstudio.com/items?itemName=AtaUlHaleem.continued)
 [![Marketplace installs](https://img.shields.io/visual-studio-marketplace/i/AtaUlHaleem.continued?label=installs)](https://marketplace.visualstudio.com/items?itemName=AtaUlHaleem.continued)
@@ -15,12 +17,14 @@
 | **VS Code** (also VSCodium, Cursor, code-server, Gitpod, Theia) | [Marketplace](https://marketplace.visualstudio.com/items?itemName=AtaUlHaleem.continued) · [Open VSX](https://open-vsx.org/extension/AtaUlHaleem/continued) · `code --install-extension AtaUlHaleem.continued` |
 | **Firefox** sidebar | [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/continued/) — Firefox 140+, desktop |
 | **Chrome / Edge** side panel | release zip in [artifacts](artifacts/) → load unpacked; store listing pending |
-| **Terminal** | `enclave-cli` tarball in a release → `npm install -g ./enclave-cli-<version>.tgz` · [cli/](cli/) |
+| **Terminal** | `enclave-harness` tarball in a release → `npm install -g ./enclave-harness-<version>.tgz` · [cli/](cli/) |
 | **Other coding agents** | export any harness as a Markdown playbook for Codex, OpenCode, Hermes or Continue.dev, or as CWL for `cwltool` |
 
 One shared core ([core/](core/)) — harness engine, document format, exporters, UI — with three hosts: [src/](src/) (VS Code), [browser-plugin/](browser-plugin/), [cli/](cli/).
 
-**Continued** is a local-first AI coding agent for VS Code. It runs against a model on your own machine through Ollama, or against an institutional endpoint such as [Blablador](https://sdlaml.pages.jsc.fz-juelich.de/ai/guides/blablador_api_access/) at Jülich Supercomputing Centre, so that code and data stay where your institution's rules say they should. Every file edit and command is approval-gated, and repeatable multi-step work is written down as a **workflow-harness**: a JSON document you can run here, export as a playbook for other coding agents, or export to Common Workflow Language and run with `cwltool`, including inside a sealed Podman container.
+**Enclave** (formerly Continued) is a local-first AI coding agent for VS Code. It runs against a model on your own machine through Ollama, or against an institutional endpoint such as [Blablador](https://sdlaml.pages.jsc.fz-juelich.de/ai/guides/blablador_api_access/) at Jülich Supercomputing Centre, so that code and data stay where your institution's rules say they should. Every file edit and command is approval-gated, and repeatable multi-step work is written down as a **workflow-harness**: a JSON document you can run here, export as a playbook for other coding agents, or export to Common Workflow Language and run with `cwltool`, including inside a sealed Podman container.
+
+**Naming.** The project is being renamed from *Continued* to *Enclave*; 1.1.0 is the first release under the new name. The VS Code extension keeps its Marketplace identifier `AtaUlHaleem.continued`, its `continued.*` settings and the `.continued/` workspace folder, and the Firefox add-on keeps its ID, so existing installs update in place with nothing to migrate. The command-line package is `enclave-harness` (command `enclave`).
 
 ---
 
@@ -42,7 +46,7 @@ One shared core ([core/](core/)) — harness engine, document format, exporters,
 
 ## How the agent works
 
-Each agent turn the model replies with exactly one JSON action. Continued executes it, feeds the result back, and repeats until the model replies with `final-answer`:
+Each agent turn the model replies with exactly one JSON action. Enclave executes it, feeds the result back, and repeats until the model replies with `final-answer`:
 
 ```json
 {"action":"read-file","path":"src/app.ts"}
@@ -91,7 +95,7 @@ Harnesses are saved as JSON in `.continued/harnesses/` and registered as skills,
 
 ## Command line
 
-The same engine runs from a terminal through `enclave-cli` (folder `cli/`): `enclave run` executes a built-in or `.continued/harnesses/` harness against the current directory with terminal approval prompts, `enclave repro` runs it *N* times per model and reports structural stability, per-step output stability and approval determinism, and `enclave validate` / `export` / `models` / `probe` cover the document format, the three export formats, the reachable models and the model probe. See [cli/README.md](cli/README.md).
+The same engine runs from a terminal through `enclave-harness` (folder `cli/`, command `enclave`): `enclave run` executes a built-in or `.continued/harnesses/` harness against the current directory with terminal approval prompts, `enclave repro` runs it *N* times per model and reports structural stability, per-step output stability and approval determinism, and `enclave validate` / `export` / `models` / `probe` cover the document format, the three export formats, the reachable models and the model probe. See [cli/README.md](cli/README.md).
 
 ## Settings
 
@@ -132,7 +136,7 @@ The same engine runs from a terminal through `enclave-cli` (folder `cli/`): `enc
 
 ## Workspace Settings & Configurations
 
-Continued allows you to switch between model endpoints directly from the sidebar. Tap the **⚙️ (Settings Gear Icon)** at the top of the panel to bring up the Provider Registration panel.
+Enclave allows you to switch between model endpoints directly from the sidebar. Tap the **⚙️ (Settings Gear Icon)** at the top of the panel to bring up the Provider Registration panel.
 
 ### Setting up Cloud Providers (Blablador)
 To connect your Helmholtz Blablador remote workspace models:
@@ -144,8 +148,8 @@ To connect your Helmholtz Blablador remote workspace models:
 
 ## Commands
 
-* `Continued: Add Cloud Provider` (`continued.addProvider`) — store an API key for OpenAI, Gemini, Anthropic or Blablador.
-* `Continued: Refresh Model List` (`continued.refreshModels`) — re-query every configured provider.
+* `Enclave: Add Cloud Provider` (`continued.addProvider`) — store an API key for OpenAI, Gemini, Anthropic or Blablador.
+* `Enclave: Refresh Model List` (`continued.refreshModels`) — re-query every configured provider.
 
 ## Writing plugins
 
@@ -225,7 +229,7 @@ run `./bundle.sh`, the first build regenerates `dist/`.
 
 ## 1.1.0
 
-One engine, three hosts: the harness engine and agent protocol now live in `core/` and run in VS Code, in the **Enclave** browser extension (Chrome side panel, Firefox sidebar) and from the terminal with `enclave-cli`. Harnesses travel as `.harness.json`, as a Markdown playbook or as Common Workflow Language, and **Run in a container** executes one with `cwltool` inside Podman. New instruments measure what the papers claim: `repro` (structural and per-step stability across runs), a conformance suite under an adversarial stub model, and a grounding check of quotes and numbers against the text a model was given. The agent is built for long runs: streamed model calls with stall detection, one retry on transient errors, a 4-hour time budget with approval waits excluded, 500 steps by default (both `0` = off), a stop after repeated failures, and notes you can send mid-run. Full list in [CHANGELOG.md](CHANGELOG.md).
+First release under the name **Enclave** (formerly Continued); identifiers, settings and the `.continued/` folder are unchanged, so nothing migrates. One engine, three hosts: the harness engine and agent protocol now live in `core/` and run in VS Code, in the **Enclave** browser extension (Chrome side panel, Firefox sidebar) and from the terminal with `enclave-cli`. Harnesses travel as `.harness.json`, as a Markdown playbook or as Common Workflow Language, and **Run in a container** executes one with `cwltool` inside Podman. New instruments measure what the papers claim: `repro` (structural and per-step stability across runs), a conformance suite under an adversarial stub model, and a grounding check of quotes and numbers against the text a model was given. The agent is built for long runs: streamed model calls with stall detection, one retry on transient errors, a 4-hour time budget with approval waits excluded, 500 steps by default (both `0` = off), a stop after repeated failures, and notes you can send mid-run. Full list in [CHANGELOG.md](CHANGELOG.md).
 
 ## 1.0.1
 
@@ -364,4 +368,4 @@ The release that turns Continued from a chat assistant with file tags into a ful
 
 ---
 
-**Enjoy a frictionless assistant experience with Continued!**
+**Enjoy a frictionless assistant experience with Enclave!**

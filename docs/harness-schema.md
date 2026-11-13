@@ -208,7 +208,7 @@ overrides the defaults with `--timeout` and `--model-timeout` (seconds); the edi
 
 ## Run from the command line
 
-`enclave run <harness>` (package `enclave-cli`, folder `cli/`) executes a harness with the same
+`enclave run <harness>` (package `enclave-harness`, folder `cli/`) executes a harness with the same
 engine against the current directory; `enclave repro <harness> --runs N --model A --model B`
 runs it repeatedly and reports structural stability, per-step output stability and approval
 determinism from the run records. Approval prompts appear on the terminal; `--yes` grants all,

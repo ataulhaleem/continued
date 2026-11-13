@@ -1,12 +1,12 @@
 # Privacy policy
 
-Applies to the Continued VS Code extension and the Continued browser extension (Chrome, Firefox). Last updated 8 September 2026.
+Applies to the Enclave VS Code extension and the Enclave browser extension (Chrome, Firefox), both formerly published as Continued. Last updated 13 November 2026.
 
-**In one sentence:** Continued has no server, no account and no analytics. The only party that receives your data is the AI model provider you select, and with Ollama that is your own computer.
+**In one sentence:** Enclave has no server, no account and no analytics. The only party that receives your data is the AI model provider you select, and with Ollama that is your own computer.
 
 ## What the extension does
 
-Continued is an AI assistant. In VS Code it works on the files in your open workspace; in the browser it works on the tabs and pages you point it at. To do that it sends the text of your request, plus the context it needs (file contents, page text, tool results), to a language model and shows you the reply.
+Enclave is an AI assistant. In VS Code it works on the files in your open workspace; in the browser it works on the tabs and pages you point it at. To do that it sends the text of your request, plus the context it needs (file contents, page text, tool results), to a language model and shows you the reply.
 
 ## Data that leaves your device
 
@@ -42,7 +42,7 @@ Uninstalling the extension removes this data.
 
 The extension injects no scripts into pages on its own, tracks no browsing, and never fills password fields.
 
-## What Continued does not do
+## What Enclave does not do
 
 - No analytics, telemetry, crash reporting or usage statistics.
 - No accounts, sign-in or developer-operated backend.
@@ -51,7 +51,7 @@ The extension injects no scripts into pages on its own, tracks no browsing, and 
 
 ## Children
 
-Continued is a developer tool and is not directed at children under 13.
+Enclave is a developer tool and is not directed at children under 13.
 
 ## Changes and contact
 

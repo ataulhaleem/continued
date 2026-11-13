@@ -6,7 +6,7 @@
 
 ## What Was Built
 
-A **zero-dependency, extensible plugin system** for Continued that lets users enable/disable tools, resources, and skills via checkboxes—no configuration files, no restart needed.
+A **zero-dependency, extensible plugin system** for Enclave that lets users enable/disable tools, resources, and skills via checkboxes—no configuration files, no restart needed.
 
 ### Core Components
 
@@ -306,7 +306,7 @@ export const codeReviewTool: ITool = {
 4. Test with agent
 5. Share on GitHub (tag: `#continued-plugins`)
 
-### For Continued Core Contributors
+### For Enclave Core Contributors
 - Built-in plugins follow same interface as user plugins
 - Add new built-ins to `src/plugins/builtIn/`
 - Import and register in `_initializePlugins()`

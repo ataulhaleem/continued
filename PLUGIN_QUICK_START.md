@@ -1,6 +1,6 @@
 # Plugin System Quick Start
 
-Welcome to Continued's extensible plugin architecture! This guide helps you get started in 5 minutes.
+Welcome to Enclave's extensible plugin architecture! This guide helps you get started in 5 minutes.
 
 ## What You Got
 
@@ -14,7 +14,7 @@ Welcome to Continued's extensible plugin architecture! This guide helps you get 
 
 ### For Users
 
-1. Open Continued sidebar (🔌 icon in chat)
+1. Open Enclave sidebar (🔌 icon in chat)
 2. Click **"🔌 Plugins"** button
 3. Toggle plugins on/off with checkboxes
 4. Done! Settings persist automatically

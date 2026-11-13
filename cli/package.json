@@ -1,5 +1,5 @@
 {
-  "name": "enclave-cli",
+  "name": "enclave-harness",
   "version": "0.1.0",
   "description": "Run, validate, export and reproduce Enclave workflow-harnesses from the terminal.",
   "license": "MIT",

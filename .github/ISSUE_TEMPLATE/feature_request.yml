@@ -1,5 +1,5 @@
 name: Feature Request
-description: Suggest an improvement to Continued
+description: Suggest an improvement to Enclave
 labels: [ enhancement ]
 body:
 - type: markdown
@@ -20,7 +20,7 @@ body:
   id: proposal
   attributes:
     label: Proposed Solution
-    description: What should Continued do?
+    description: What should Enclave do?
     placeholder: Describe the expected UX/behavior
   validations:
     required: true

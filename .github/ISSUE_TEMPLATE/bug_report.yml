@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a reproducible problem in Continued
+description: Report a reproducible problem in Enclave
 labels: [ bug ]
 body:
 - type: markdown
@@ -47,7 +47,7 @@ body:
 - type: input
   id: extension-version
   attributes:
-    label: Continued Version
+    label: Enclave Version
     placeholder: e.g. 1.0.0
 
 - type: input

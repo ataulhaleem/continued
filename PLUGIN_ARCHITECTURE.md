@@ -1,6 +1,6 @@
-# Continued Plugin Architecture
+# Enclave Plugin Architecture
 
-The plugin system allows you to extend Continued with custom **Tools**, **Resources**, and **Skills** without modifying the core extension code. Users can enable/disable plugins via a simple checkbox interface.
+The plugin system allows you to extend Enclave with custom **Tools**, **Resources**, and **Skills** without modifying the core extension code. Users can enable/disable plugins via a simple checkbox interface.
 
 ## Architecture Overview
 
@@ -155,7 +155,7 @@ export const myCustomTool: ITool = {
 
 ### Step 3: Enable in UI
 
-1. Open Continued sidebar
+1. Open Enclave sidebar
 2. Click the **🔌 Plugins** button
 3. Find your plugin in the "User Plugins" section
 4. Toggle the checkbox to enable
@@ -299,7 +299,7 @@ async execute(args: { path: string }) {
 To share plugins:
 
 1. Publish to GitHub with `.continued/plugins/` examples
-2. Add to Continued Plugin Registry (future feature)
+2. Add to Enclave Plugin Registry (future feature)
 3. Users copy to their `.continued/plugins/` directory
 
 ---

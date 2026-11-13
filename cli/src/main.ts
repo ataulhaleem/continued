@@ -33,7 +33,7 @@ import { tools, resources } from './tools';
 import { ProgressPrinter, tree, table, bold, dim, green, red, yellow, paint, ICON } from './render';
 
 const VERSION = '0.1.0';
-const GENERATOR = `enclave-cli ${VERSION}`;
+const GENERATOR = `enclave-harness ${VERSION}`;
 
 // ---------------------------------------------------------------------------
 // Arguments

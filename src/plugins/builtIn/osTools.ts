@@ -13,7 +13,7 @@ export const gitInfoTool: ITool = {
     id: 'git-info',
     name: 'Git Info',
     version: '1.0.0',
-    author: 'Continued',
+    author: 'Enclave',
     description: 'Read-only git queries. args: { action: status|diff|log|branches|show, path (optional file to scope diff/log), count (log entries, default 10), ref (for show) }',
     enabled: true,
     source: 'built-in',
@@ -53,7 +53,7 @@ export const pythonRunTool: ITool = {
     id: 'python-run',
     name: 'Run Python',
     version: '1.0.0',
-    author: 'Continued',
+    author: 'Enclave',
     description: 'Run a Python snippet (or a script file) with the workspace as cwd and return stdout/stderr. Disabled by default; enable it in Plugin Manager. args: { code (snippet) or filePath (script), args (extra CLI args), timeoutMs (default 60000), python (interpreter, default python3) }',
     enabled: false,
     source: 'built-in',
@@ -98,7 +98,7 @@ export const httpFetchTool: ITool = {
     id: 'http-fetch',
     name: 'HTTP Fetch',
     version: '1.0.0',
-    author: 'Continued',
+    author: 'Enclave',
     description: 'GET a public URL and return the body as text (HTML is reduced to text). Disabled by default; enable it in Plugin Manager. args: { url, maxChars (default 8000), raw (keep HTML, default false) }',
     enabled: false,
     source: 'built-in',
@@ -124,7 +124,7 @@ export const httpFetchTool: ITool = {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 30000);
         try {
-            const response = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'Continued-VSCode/1.0 (+https://github.com/ataulhaleem/continued)', Accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5' }, redirect: 'follow' });
+            const response = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'Enclave-VSCode/1.0 (+https://github.com/ataulhaleem/continued)', Accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5' }, redirect: 'follow' });
             const type = response.headers.get('content-type') ?? '';
             if (!response.ok) { throw new Error(`HTTP ${response.status} ${response.statusText}`); }
             let body = await response.text();
