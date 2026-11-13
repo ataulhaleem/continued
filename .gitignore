@@ -8,3 +8,10 @@ versions
 .continued
 dist
 out
+artifacts
+
+# Manuscripts and their evidence archive stay local
+publication/
+.nuxt
+.output
+.data

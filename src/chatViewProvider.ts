@@ -1,26 +1,32 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { showProviderSelector } from './providers';
 import { PluginRegistry } from './plugins/pluginRegistry';
 import { SkillContext } from './plugins/types';
-import { generateChatViewHTML } from './chatView';
+import { generateChatViewHTML } from '../core/ui/chatView';
 import { readFileTool, writeFileTool, deleteFileTool } from './plugins/builtIn/fileTools';
 import { semanticSearchTool, grepSearchTool, workspaceFilesResource } from './plugins/builtIn/searchTools';
 import { runCommandTool, openFileTool } from './plugins/builtIn/terminalTools';
 import { listDirectoryTool, fileInfoTool, editFileTool, appendFileTool, moveFileTool, copyFileTool, makeDirectoryTool } from './plugins/builtIn/fsTools';
 import { csvPreviewTool, jsonQueryTool } from './plugins/builtIn/dataTools';
 import { gitInfoTool, pythonRunTool, httpFetchTool } from './plugins/builtIn/osTools';
+import { createModelTools } from './plugins/builtIn/modelTools';
 import { systemInfoResource, devEnvironmentResource, openEditorsResource, gitSummaryResource, diagnosticsResource, projectInfoResource } from './plugins/builtIn/resources';
 import { projectSnapshotSkill, largestFilesSkill } from './plugins/builtIn/builtInSkills';
 import { LlmClient, ChatMessage, CompletionResult } from './llmClient';
 import { AgentGuardrails } from './agentGuardrails';
-import { HarnessDefinition, HarnessRun } from './harness/types';
-import { HarnessHost, runHarness, summarizeRun, validateHarness } from './harness/harnessEngine';
+import { HarnessDefinition, HarnessRun } from '../core/harness/types';
+import { HarnessHost, runHarness, summarizeRun, validateHarness } from '../core/harness/harnessEngine';
 import { builtInHarnesses } from './harness/builtInHarnesses';
 import { deleteUserHarness, harnessFileUri, loadUserHarnesses, saveUserHarness, slugifyHarnessId } from './harness/harnessStore';
+import { collectRequirements, exportFileName, fromPortable, toMarkdown, toPortableJson } from '../core/harness/portable';
+import { cwlFileNames, toCwl } from '../core/harness/cwl';
+import { ContainerEndpoint, PodmanNotFoundError, checkPodman, confirmContainerRun, installPodmanInTerminal, prepareContainerRun, runInContainer } from './harness/containerRunner';
+import { detectProvider, getOllamaBaseUrl, stripProviderPrefix } from './llmClient';
 import { ISkill } from './plugins/types';
 import {
     AgentAction,
@@ -33,8 +39,9 @@ import {
     isLegacyUiLabel,
     isReadOnlyAction,
     parseAgentAction,
-    sanitizeAgentDisplayResponse
-} from './agentActions';
+    sanitizeAgentDisplayResponse,
+    canonicalizeAction as canonicalizeAgentAction
+} from '../core/agentActions';
 
 const execAsync = promisify(exec);
 
@@ -59,6 +66,8 @@ interface AttachedFile {
     type?: string;
     size?: number;
     isImage?: boolean;
+    /** Set by the shared chat UI for .pdf files, whose content is then a data URL. */
+    isPdf?: boolean;
     content?: string;
 }
 
@@ -66,6 +75,16 @@ interface PendingApproval {
     action: AgentAction;
     model: string;
     mode: AgentRunMode;
+}
+
+/** One harness step waiting for the user to allow or decline it. */
+interface QueuedApproval {
+    action: AgentAction;
+    view: vscode.WebviewView;
+    /** Set when the step reads the active editor document from outside the workspace. */
+    outsideDocument?: vscode.TextDocument | null;
+    /** Resolve the waiting step. Safe to call more than once; only the first call counts. */
+    settle(allow: boolean): void;
 }
 
 /** A file change made by the agent in this session, kept so it can be reverted from the UI. */
@@ -78,7 +97,16 @@ interface RunChange {
 
 type AgentRunMode = 'agent' | 'agent-auto';
 
+/** Marks a message the user sent while an agent run was going; the model reads it as guidance mid-task. */
+const STEER_PREFIX = '[USER NOTE during the run]';
+function isSteeringNote(content: string): boolean { return content.startsWith(STEER_PREFIX); }
+
 const DEDICATED_TOOL_IDS = ['read-file', 'write-file', 'delete-file', 'semantic-search', 'grep-search', 'run-command'];
+
+/** Canonicalize against this host's dedicated tools. See `canonicalizeAction` in core. */
+function canonicalizeAction(action: AgentAction): AgentAction {
+    return canonicalizeAgentAction(action, DEDICATED_TOOL_IDS);
+}
 
 function isAgentMode(mode: string): mode is AgentRunMode {
     return mode === 'agent' || mode === 'agent-auto';
@@ -99,16 +127,31 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
     /** Files whose current content the model has seen in this run (read or written). */
     private _runKnownFiles: Set<string> = new Set();
     private _agentIteration = 0;
+    /** When the current agent run started; the wall-clock budget is measured from here. */
+    private _agentRunStartedAt = 0;
+    /** Time this run spent waiting for the user's approval; it does not count against the budget. */
+    private _agentPausedMs = 0;
+    private _approvalWaitStartedAt = 0;
     private _completionChallengeSent = false;
     private _agentTask = '';
+    private _pendingTask = '';
+    /** The mode the run follows right now: the dropdown can change it while the run is going. */
+    private _liveMode: AgentRunMode = 'agent';
 
     // Harness state
     private _harnesses: Map<string, HarnessDefinition> = new Map();
     private _harnessProblems: string[] = [];
     private _harnessAbort: AbortController | null = null;
     private _lastHarnessRun: HarnessRun | null = null;
-    /** Resolver for an approval requested by a harness step (promise-based, unlike the agent loop). */
-    private _approvalWaiter: ((allow: boolean) => void) | null = null;
+    /**
+     * Approvals requested by harness steps (promise-based, unlike the agent loop).
+     *
+     * A parallel group or a parallel foreach can raise several at once, so they queue and are
+     * shown one at a time. Only the head of the queue is on screen; the rest wait their turn.
+     * An earlier design kept a single slot and silently auto-declined whatever was already
+     * waiting, which made parallel steps fail with an unexplained DECLINED.
+     */
+    private _approvalQueue: QueuedApproval[] = [];
     private _agentCurrentFile: string | null = null;
     private _agentAbort: AbortController | null = null;
     private _lastActionKey = '';
@@ -139,10 +182,22 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
         return vscode.workspace.getConfiguration('continued').get<T>(key, fallback);
     }
 
+    /** Sleep that ends early when the run is cancelled. */
+    private _pause(ms: number, signal: AbortSignal): Promise<void> {
+        return new Promise(resolve => {
+            if (signal.aborted) { resolve(); return; }
+            const timer = setTimeout(() => { signal.removeEventListener('abort', done); resolve(); }, ms);
+            const done = () => { clearTimeout(timer); resolve(); };
+            signal.addEventListener('abort', done, { once: true });
+        });
+    }
+
     private _createGuardrails(): AgentGuardrails {
         return new AgentGuardrails({
-            maxIterations: this._cfg<number>('agent.maxIterations', 20),
+            maxIterations: this._cfg<number>('agent.maxIterations', 500),
             commandTimeoutMs: this._cfg<number>('agent.commandTimeoutMs', 60000),
+            maxRunMs: this._cfg<number>('agent.maxRunMinutes', 240) * 60000,
+            maxConsecutiveFailures: this._cfg<number>('agent.maxConsecutiveFailures', 4),
         });
     }
 
@@ -380,6 +435,9 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
         for (const tool of [listDirectoryTool, fileInfoTool, editFileTool, appendFileTool, moveFileTool, copyFileTool, makeDirectoryTool, csvPreviewTool, jsonQueryTool, gitInfoTool, pythonRunTool, httpFetchTool]) {
             this._pluginRegistry.registerTool(tool);
         }
+        for (const tool of createModelTools(this._llm)) {
+            this._pluginRegistry.registerTool(tool);
+        }
 
         this._pluginRegistry.registerResource(workspaceFilesResource);
         for (const resource of [projectInfoResource, gitSummaryResource, diagnosticsResource, openEditorsResource, devEnvironmentResource, systemInfoResource]) {
@@ -472,7 +530,7 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private _postHarnessCatalog(view: vscode.WebviewView) {
-        view.webview.postMessage({ type: 'harnessCatalog', catalog: this._harnessCatalog() });
+        view.webview.postMessage({ type: 'harnessCatalog', catalog: { ...this._harnessCatalog(), capabilities: { container: true } } });
     }
 
     private _knownPluginSets() {
@@ -514,54 +572,393 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
 
     /** Execute a tool plugin on behalf of a harness step: guardrails + mode approval + change tracking. */
     private async _runHarnessTool(pluginId: string, args: Record<string, unknown>, mode: string, view: vscode.WebviewView, signal: AbortSignal): Promise<string> {
-        const str = (v: unknown) => (v === undefined || v === null ? '' : String(v));
-        let action: AgentAction;
-        switch (pluginId) {
-            case 'read-file':       action = { type: 'read-file', path: str(args.filePath ?? args.path) }; break;
-            case 'write-file':      action = { type: 'write-file', path: str(args.filePath ?? args.path), content: str(args.content) }; break;
-            case 'delete-file':     action = { type: 'delete-file', path: str(args.filePath ?? args.path) }; break;
-            case 'semantic-search': action = { type: 'semantic-search', query: str(args.pattern ?? args.query) }; break;
-            case 'grep-search':     action = { type: 'grep-search', query: str(args.query ?? args.pattern), filePattern: str(args.filePattern) || '**/*' }; break;
-            case 'run-command':     action = { type: 'run-command', command: str(args.command) }; break;
-            default:                action = { type: 'use-tool', tool: pluginId, args };
-        }
+        const action = canonicalizeAction({ type: 'use-tool', tool: pluginId, args });
         if (action.type !== 'use-tool' && !this._isToolEnabled(pluginId)) {
             return `FAILED: tool '${pluginId}' is disabled in Plugin Manager.`;
         }
         return this._executeActionWithPolicy(action, mode, view, signal);
     }
 
-    /** Promise-based counterpart of the agent loop's dispatch: guardrails, approval by mode, then execution. */
-    private async _executeActionWithPolicy(action: AgentAction, mode: string, view: vscode.WebviewView, signal: AbortSignal): Promise<string> {
-        const blocked = await this._guardrailCheck(action, false);
-        if (blocked) { return `BLOCKED: ${blocked}`; }
-
-        const needsApproval = !this._isReadOnly(action) && (
-            mode !== 'agent-auto' ||
-            (action.type === 'run-command' && this._guardrails.requiresExplicitApproval(action.command))
-        );
-        if (needsApproval) {
-            const allowed = await this._awaitApproval(view, action, signal);
-            if (!allowed) { return 'DECLINED: the user did not approve this step.'; }
+    /** The harness engine's gate: guardrails and approval, run before the step's timeout starts. */
+    private async _gateHarnessTool(pluginId: string, args: Record<string, unknown>, mode: string, view: vscode.WebviewView, signal: AbortSignal): Promise<string | null> {
+        const action = canonicalizeAction({ type: 'use-tool', tool: pluginId, args });
+        if (action.type !== 'use-tool' && !this._isToolEnabled(pluginId)) {
+            return `FAILED: tool '${pluginId}' is disabled in Plugin Manager.`;
         }
+        return this._policyGate(action, mode, view, signal);
+    }
+
+    /** The execution half: the gate has already passed. */
+    private _executeHarnessTool(pluginId: string, args: Record<string, unknown>): Promise<string> {
+        return this._executeAgentAction(canonicalizeAction({ type: 'use-tool', tool: pluginId, args }));
+    }
+
+    /** Promise-based counterpart of the agent loop's dispatch: guardrails, approval by mode, then execution. */
+    private async _executeActionWithPolicy(rawAction: AgentAction, mode: string, view: vscode.WebviewView, signal: AbortSignal): Promise<string> {
+        const action = canonicalizeAction(rawAction);
+        const verdict = await this._policyGate(action, mode, view, signal);
+        if (verdict) { return verdict; }
         return this._executeAgentAction(action);
     }
 
-    private _awaitApproval(view: vscode.WebviewView, action: AgentAction, signal: AbortSignal): Promise<boolean> {
+    /** Guardrails, then approval by mode. Resolves null to proceed, or the BLOCKED/DECLINED result. */
+    private async _policyGate(action: AgentAction, mode: string, view: vscode.WebviewView, signal: AbortSignal): Promise<string | null> {
+        const blocked = await this._guardrailCheck(action, false);
+        if (blocked) { return `BLOCKED: ${blocked}`; }
+
+        const outsideDocument = this._activeDocumentOutsideWorkspace(action);
+        const needsApproval = outsideDocument !== null || (!this._isReadOnly(action) && (
+            mode !== 'agent-auto' ||
+            this._sendsDataOut(action) ||
+            (action.type === 'run-command' && this._guardrails.requiresExplicitApproval(action.command))
+        ));
+        if (needsApproval) {
+            const allowed = await this._awaitApproval(view, action, signal, outsideDocument);
+            if (!allowed) { return 'DECLINED: the user did not approve this step.'; }
+        }
+        return null;
+    }
+
+    private _awaitApproval(view: vscode.WebviewView, action: AgentAction, signal: AbortSignal, outsideDocument: vscode.TextDocument | null = null): Promise<boolean> {
         return new Promise<boolean>(resolve => {
             if (signal.aborted) { resolve(false); return; }
-            this._approvalWaiter?.(false);
-            const finish = (allow: boolean) => {
-                if (this._approvalWaiter === finish) { this._approvalWaiter = null; }
-                signal.removeEventListener('abort', onAbort);
-                resolve(allow);
+            let settled = false;
+            const onAbort = () => entry.settle(false);
+            const entry: QueuedApproval = {
+                action,
+                view,
+                outsideDocument,
+                settle: (allow: boolean) => {
+                    if (settled) { return; }
+                    settled = true;
+                    signal.removeEventListener('abort', onAbort);
+                    const wasOnScreen = this._approvalQueue[0] === entry;
+                    const index = this._approvalQueue.indexOf(entry);
+                    if (index !== -1) { this._approvalQueue.splice(index, 1); }
+                    resolve(allow);
+                    // Only the head is displayed, so the next one moves up when it is answered.
+                    if (wasOnScreen) { this._showNextApproval(); }
+                }
             };
-            const onAbort = () => finish(false);
-            this._approvalWaiter = finish;
             signal.addEventListener('abort', onAbort, { once: true });
-            this._requestApproval(view, action);
-            view.webview.postMessage({ type: 'agentWorking', step: 0, label: 'harness is waiting for your approval…' });
+            this._approvalQueue.push(entry);
+            if (this._approvalQueue.length === 1) { this._showNextApproval(); }
         });
+    }
+
+    /** Put the request at the head of the queue on screen, if there is one. */
+    private _showNextApproval() {
+        const head = this._approvalQueue[0];
+        if (!head) { return; }
+        const waiting = this._approvalQueue.length - 1;
+        this._requestApproval(head.view, head.action, head.outsideDocument ?? null);
+        head.view.webview.postMessage({
+            type: 'agentWorking',
+            step: 0,
+            label: waiting > 0
+                ? `harness is waiting for your approval… (${waiting} more queued)`
+                : 'harness is waiting for your approval…'
+        });
+    }
+
+    /** Answer the request currently on screen. Returns false when no harness step is waiting. */
+    private _resolveCurrentApproval(allow: boolean): boolean {
+        const head = this._approvalQueue[0];
+        if (!head) { return false; }
+        head.settle(allow);
+        return true;
+    }
+
+    /** Decline every queued request — the run was cancelled or has finished. */
+    private _drainApprovals() {
+        while (this._approvalQueue.length > 0) { this._approvalQueue[0].settle(false); }
+    }
+
+    /** Application name and version recorded in exported documents, for provenance. */
+    private _generatorId(): string {
+        const version = (this._context.extension?.packageJSON?.version as string) || '0.0.0';
+        return `enclave/${version}`;
+    }
+
+    /**
+     * Write a harness to a file the user chooses.
+     *
+     * Two formats, because they serve different readers. The JSON document is executable and
+     * re-importable here; the Markdown playbook is the same procedure written out for the
+     * agents documented alongside Blablador, none of which read this schema — it drops into an
+     * `AGENTS.md`, a `CLAUDE.md`, an OpenCode command or a Continue.Dev prompt file.
+     */
+    private async _exportHarness(def: HarnessDefinition, format: 'json' | 'markdown' | 'cwl'): Promise<void> {
+        if (format === 'cwl') { return this._exportHarnessCwl(def); }
+        const extension = format === 'json' ? 'json' : 'md';
+        const generator = this._generatorId();
+        const defaultDir = this._workspaceRoot();
+        const target = await vscode.window.showSaveDialog({
+            defaultUri: defaultDir
+                ? vscode.Uri.joinPath(vscode.Uri.file(defaultDir), exportFileName(def, extension))
+                : vscode.Uri.file(exportFileName(def, extension)),
+            filters: format === 'json' ? { 'Harness document': ['json'] } : { 'Markdown': ['md'] },
+            saveLabel: format === 'json' ? 'Export harness' : 'Export playbook'
+        });
+        if (!target) { return; }
+
+        const contents = format === 'json'
+            ? toPortableJson(def, { generator })
+            : toMarkdown(def, { generator });
+
+        try {
+            await vscode.workspace.fs.writeFile(target, new TextEncoder().encode(contents));
+            this._log.appendLine(`[${new Date().toISOString()}] exported harness ${def.id} as ${format} to ${target.fsPath}`);
+            const open = await vscode.window.showInformationMessage(
+                `Exported "${def.name}" to ${target.path.split('/').pop()}.`,
+                'Open'
+            );
+            if (open === 'Open') {
+                await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(target), { preview: false });
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not export harness: ${(error as Error).message}`);
+        }
+    }
+
+    /**
+     * Write the harness as a Common Workflow Language document plus a job file beside it.
+     *
+     * The job file takes its name from whatever the user called the workflow file, so the two
+     * stay paired if the default name is changed in the dialog. Translation notes — constructs
+     * CWL cannot express, such as approval prompts — are in the document header and are
+     * summarised in the confirmation so nobody runs the export assuming it is the harness.
+     */
+    private async _exportHarnessCwl(def: HarnessDefinition): Promise<void> {
+        const names = cwlFileNames(def);
+        const defaultDir = this._workspaceRoot();
+        const target = await vscode.window.showSaveDialog({
+            defaultUri: defaultDir ? vscode.Uri.joinPath(vscode.Uri.file(defaultDir), names.workflow) : vscode.Uri.file(names.workflow),
+            filters: { 'Common Workflow Language': ['cwl'] },
+            saveLabel: 'Export CWL'
+        });
+        if (!target) { return; }
+
+        const model = this._getScopedState<string>('continued_last_model') || 'llama3';
+        const { workflow, job, notes } = toCwl(def, { generator: this._generatorId(), defaultModel: model });
+        const base = target.path.split('/').pop()!.replace(/\.cwl$/i, '');
+        const jobTarget = vscode.Uri.joinPath(target.with({ path: target.path.replace(/[^/]*$/, '') }), `${base}.cwl-job.yml`);
+
+        try {
+            await vscode.workspace.fs.writeFile(target, new TextEncoder().encode(workflow));
+            await vscode.workspace.fs.writeFile(jobTarget, new TextEncoder().encode(job));
+            this._log.appendLine(`[${new Date().toISOString()}] exported harness ${def.id} as CWL to ${target.fsPath} (+ job file); ${notes.length} translation note(s)`);
+            const open = await vscode.window.showInformationMessage(
+                `Exported "${def.name}" as ${base}.cwl and ${base}.cwl-job.yml. ${notes.length} translation note${notes.length === 1 ? '' : 's'} in the file header — read them before running.`,
+                'Open'
+            );
+            if (open === 'Open') {
+                await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(target), { preview: false });
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not export CWL: ${(error as Error).message}`);
+        }
+    }
+
+    /**
+     * Read a harness document chosen by the user into `.continued/harnesses/`.
+     *
+     * Importing runs no steps, but it does add a definition that can later execute tools and
+     * shell commands, so the user is shown what the harness requires and confirms before it is
+     * saved. An id that is already taken is reported rather than silently overwritten.
+     */
+    private async _importHarness(view: vscode.WebviewView): Promise<void> {
+        const picked = await vscode.window.showOpenDialog({
+            canSelectMany: false,
+            openLabel: 'Import harness',
+            filters: { 'Harness document': ['json'] }
+        });
+        const file = picked?.[0];
+        if (!file) { return; }
+
+        let raw: string;
+        try {
+            raw = new TextDecoder().decode(await vscode.workspace.fs.readFile(file));
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not read that file: ${(error as Error).message}`);
+            return;
+        }
+
+        const result = fromPortable(raw, validateHarness);
+        if (!result.harness) {
+            view.webview.postMessage({ type: 'harnessError', message: `That file is not a usable harness:\n- ${result.problems.join('\n- ')}` });
+            return;
+        }
+
+        const def = result.harness;
+        const requires = collectRequirements(def);
+        const registry = this._pluginRegistry;
+        const missing = [
+            ...requires.tools.filter(id => !registry?.getTool(id)),
+            ...requires.resources.filter(id => !registry?.getResource(id)),
+            ...requires.skills.filter(id => !registry?.getSkill(id) && !this._harnesses.has(id))
+        ];
+
+        const detailLines = [
+            requires.tools.length ? `Tools: ${requires.tools.join(', ')}` : '',
+            requires.resources.length ? `Context: ${requires.resources.join(', ')}` : '',
+            requires.usesModel ? 'Calls a language model.' : 'Does not call a language model.',
+            missing.length ? `Not available here: ${missing.join(', ')}` : '',
+            result.warnings.join(' ')
+        ].filter(Boolean);
+
+        const replacing = this._harnesses.has(def.id);
+        const confirm = await vscode.window.showWarningMessage(
+            replacing
+                ? `Replace the existing harness "${def.id}" with the one in this file?`
+                : `Import the harness "${def.name}"?`,
+            {
+                modal: true,
+                detail: `A harness can run tools and shell commands when you execute it. Review it before running.\n\n${detailLines.join('\n')}`
+            },
+            replacing ? 'Replace' : 'Import'
+        );
+        if (confirm !== 'Import' && confirm !== 'Replace') { return; }
+
+        try {
+            await saveUserHarness(def);
+            await this._loadHarnesses();
+            this._postHarnessCatalog(view);
+            this._log.appendLine(`[${new Date().toISOString()}] imported harness ${def.id} from ${file.fsPath}`);
+            const warn = missing.length ? ` It needs ${missing.join(', ')}, which ${missing.length === 1 ? 'is' : 'are'} not registered here.` : '';
+            vscode.window.showInformationMessage(`Imported "${def.name}".${warn}`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not save the imported harness: ${(error as Error).message}`);
+        }
+    }
+
+    /**
+     * Only an OpenAI-compatible endpoint can be reached by the CWL runner inside the container.
+     * Ollama, OpenAI and Blablador qualify; the others are refused with a clear message rather
+     * than failing inside the container where the reason would be hard to see.
+     */
+    private async _containerEndpoint(modelId: string): Promise<ContainerEndpoint> {
+        const provider = detectProvider(modelId);
+        const model = stripProviderPrefix(modelId);
+        switch (provider) {
+            case 'ollama':
+                return { baseUrl: `${getOllamaBaseUrl()}/v1`, model, apiKey: null };
+            case 'openai':
+                return { baseUrl: 'https://api.openai.com/v1', model, apiKey: (await this._context.secrets.get('openai_api_key')) ?? null };
+            case 'blablador':
+                return { baseUrl: 'https://api.blablador.fz-juelich.de/v1', model, apiKey: (await this._context.secrets.get('blablador_api_key')) ?? null };
+            default:
+                throw new Error(`Container runs need an OpenAI-compatible endpoint. "${modelId}" is a ${provider} model; choose an Ollama, OpenAI or Blablador model in the picker and run again.`);
+        }
+    }
+
+    /**
+     * Podman is missing: say so in the Run tab, install it in a terminal the user can watch,
+     * and resume the run the moment it is found. The terminal asks for the root password
+     * itself; the extension only runs the package manager's install command.
+     */
+    private async _handleMissingPodman(def: HarnessDefinition, input: string, model: string, mode: string, view: vscode.WebviewView, podman: string): Promise<void> {
+        const now = Date.now();
+        view.webview.postMessage({
+            type: 'harnessRunDone',
+            run: {
+                harnessId: def.id, harnessName: def.name, input, status: 'cancelled', steps: [], output: '',
+                error: `Waiting for Podman: it is not installed, so Enclave is installing it in the terminal "Enclave: install Podman". The run resumes automatically once Podman is available.`,
+                startedAt: now, endedAt: now
+            } as HarnessRun
+        });
+        view.webview.postMessage({ type: 'agentDone' });
+
+        const outcome = await installPodmanInTerminal(podman);
+        if (outcome === 'installed') {
+            const version = await checkPodman(podman).catch(() => 'unknown version');
+            void vscode.window.showInformationMessage(`Podman is installed (${version}). Resuming "${def.name}" in a container.`);
+            this._log.appendLine(`[${new Date().toISOString()}] podman installed (${version}); resuming container run of ${def.id}`);
+            await this._runHarnessInContainer(def, input, model, mode, view);
+            return;
+        }
+        if (outcome === 'not-found-after-install') {
+            vscode.window.showWarningMessage(
+                `Podman is still not found after the install command. Check the "Enclave: install Podman" terminal for errors. If it did install, restart VS Code so PATH is refreshed, or set continued.container.podmanPath to its location, then run the harness again.`
+            );
+        }
+    }
+
+    /**
+     * Run a harness inside a Podman container via its CWL export: plan, confirm, build, run.
+     * Shares the harness abort controller so the Stop button works for both kinds of run.
+     */
+    private async _runHarnessInContainer(def: HarnessDefinition, input: string, model: string, mode: string, view: vscode.WebviewView): Promise<void> {
+        if (this._harnessAbort && !this._harnessAbort.signal.aborted) {
+            throw new Error('Another harness is still running. Stop it first.');
+        }
+        const root = this._workspaceRoot();
+        if (!root) { throw new Error('Open a workspace folder before running a harness in a container.'); }
+
+        const cfg = vscode.workspace.getConfiguration('continued');
+        const podman = cfg.get<string>('container.podmanPath', 'podman') || 'podman';
+        const outputBase = cfg.get<string>('container.outputDir', '.continued/harness-runs') || '.continued/harness-runs';
+        const extraPackages = cfg.get<string[]>('container.extraPackages', []) ?? [];
+
+        let version: string;
+        try {
+            version = await checkPodman(podman);
+        } catch (error) {
+            if (!(error instanceof PodmanNotFoundError)) { throw error; }
+            await this._handleMissingPodman(def, input, model, mode, view, podman);
+            return;
+        }
+        const endpoint = await this._containerEndpoint(model);
+
+        // Editor state travels with the run as plain values; the container itself never sees the editor.
+        const active = vscode.window.activeTextEditor;
+        const activeFile = active && active.document.uri.scheme === 'file' && !active.document.isUntitled ? active.document.uri.fsPath : '';
+        if (activeFile && !this._guardrails.isForbiddenPath(activeFile).safe) {
+            throw new Error(`The active editor file (${activeFile}) is on the forbidden-paths list and cannot be handed to a harness.`);
+        }
+        const editor = { activeFile, selection: this._harnessVariables().selection };
+
+        const abort = new AbortController();
+        const request = {
+            def, input, workspaceRoot: root, editor, endpoint, podman, outputBase, extraPackages,
+            generator: this._generatorId(),
+            log: (line: string) => this._log.appendLine(`[${new Date().toISOString()}] podman ${def.id}: ${line}`),
+            onUpdate: (run: HarnessRun) => { this._lastHarnessRun = run; view.webview.postMessage({ type: 'harnessRunUpdate', run }); },
+            signal: abort.signal
+        };
+        const prepared = prepareContainerRun(request);
+        const network = await confirmContainerRun(def, prepared, root);
+        if (!network) {
+            // The Run tab is already showing "Starting…"; tell it the run was cancelled before it began.
+            const now = Date.now();
+            view.webview.postMessage({
+                type: 'harnessRunDone',
+                run: { harnessId: def.id, harnessName: def.name, input, status: 'cancelled', steps: [], output: '', error: 'Cancelled: the container confirmation was dismissed. Nothing was built or run.', startedAt: now, endedAt: now } as HarnessRun
+            });
+            view.webview.postMessage({ type: 'agentDone' });
+            return;
+        }
+
+        this._harnessAbort = abort;
+        this._log.appendLine(`[${new Date().toISOString()}] ▶ container harness ${def.id} (${version}, network ${network}, image ${prepared.tag})`);
+        view.webview.postMessage({ type: 'agentWorking', step: 0, label: `harness "${def.name}" running in a container…` });
+        let run: HarnessRun;
+        try {
+            run = await runInContainer(request, prepared, network);
+        } finally {
+            if (this._harnessAbort === abort) { this._harnessAbort = null; }
+        }
+        this._lastHarnessRun = run;
+        this._log.appendLine(`[${new Date().toISOString()}] ■ container harness ${def.id} ${run.status}${run.error ? `: ${run.error.slice(0, 200)}` : ''}`);
+        view.webview.postMessage({ type: 'harnessRunDone', run });
+
+        if (!this._currentSessionId) { this._currentSessionId = 'session_' + Date.now(); }
+        const summary = summarizeRun(run);
+        this._chatHistory.push({ role: 'user', content: `Run harness "${def.name}" in a container${input ? ` with input: ${input}` : ''}` });
+        this._chatHistory.push({ role: 'assistant', content: summary });
+        view.webview.postMessage({ type: 'harnessChatRecord', user: `▶ Harness (container): ${def.name}${input ? ` — ${input}` : ''}`, assistant: summary });
+        this._persistSession(mode);
+        view.webview.postMessage({ type: 'agentDone' });
     }
 
     private async _runHarness(
@@ -581,7 +978,8 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
         view.webview.postMessage({ type: 'agentWorking', step: 0, label: `harness "${def.name}" running…` });
 
         const host: HarnessHost = {
-            runTool: (pluginId, args, signal) => this._runHarnessTool(pluginId, args, mode, view, signal),
+            gateTool: (pluginId, args, signal) => this._gateHarnessTool(pluginId, args, mode, view, signal),
+            runTool: (pluginId, args) => this._executeHarnessTool(pluginId, args),
             runResource: async (pluginId) => {
                 const resource = this._pluginRegistry?.getResource(pluginId);
                 if (!resource) { throw new Error(`Resource '${pluginId}' is not registered.`); }
@@ -621,7 +1019,7 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
 
         let run: HarnessRun;
         try {
-            run = await runHarness(def, host, { input, signal: abort.signal, defaultModel: model });
+            run = await runHarness(def, host, { input, signal: abort.signal, defaultModel: model, modelTimeoutMs: Math.max(600000, this._cfg<number>('agent.modelTimeoutMs', 600000)) });
         } catch (error) {
             run = {
                 harnessId: def.id, harnessName: def.name, input, status: 'failed', steps: [], output: '',
@@ -629,7 +1027,7 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
             };
         } finally {
             if (this._harnessAbort === abort) { this._harnessAbort = null; }
-            this._approvalWaiter?.(false);
+            this._drainApprovals();
         }
         this._lastHarnessRun = run;
         this._log.appendLine(`[${new Date().toISOString()}] ■ harness ${def.id} ${run.status}${run.error ? `: ${run.error.slice(0, 200)}` : ''}`);
@@ -649,11 +1047,55 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
         return run;
     }
 
+    /**
+     * Ask once before running a plugin file's code.
+     *
+     * Loading a user plugin `require()`s it into the extension host, where it has the same
+     * access as the extension itself — the filesystem, the network, child processes. Opening a
+     * workspace must never be enough to make that happen, so each file is approved by its
+     * content hash: an edited plugin is a new file as far as this check is concerned and is
+     * asked about again.
+     */
+    private async _confirmPluginLoad(name: string, uri: vscode.Uri, contents: Uint8Array): Promise<boolean> {
+        const digest = crypto.createHash('sha256').update(contents).digest('hex');
+        const key = `plugin_trusted::${this._workspaceScopeId()}::${name}::${digest}`;
+        const remembered = this._context.globalState.get<boolean>(key);
+        if (remembered !== undefined) { return remembered; }
+
+        const choice = await vscode.window.showWarningMessage(
+            `Continued found the plugin "${name}" in this workspace's .continued/plugins/ folder.`,
+            {
+                modal: true,
+                detail: 'Loading it runs its JavaScript with the same access this extension has: your files, '
+                    + 'your network and your shell. Only load plugins from a source you trust.\n\n'
+                    + 'Your answer is remembered until the file changes.'
+            },
+            'Load plugin',
+            'Show me the file'
+        );
+
+        if (choice === 'Show me the file') {
+            await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
+            return false;   // Not remembered: decide next time, having seen the code.
+        }
+
+        const allow = choice === 'Load plugin';
+        await this._context.globalState.update(key, allow);
+        return allow;
+    }
+
     private async _loadUserPlugins() {
         if (!this._pluginRegistry) { return; }
 
         const folders = vscode.workspace.workspaceFolders;
         if (!folders || folders.length === 0) { return; }
+
+        // Restricted Mode means "I have not vouched for the code in this folder", and a plugin
+        // here is exactly that: code from the folder.
+        if (!vscode.workspace.isTrusted) {
+            this._log.appendLine(`[${new Date().toISOString()}] workspace is not trusted — user plugins were not loaded`);
+            return;
+        }
 
         const pluginDir = vscode.Uri.joinPath(folders[0].uri, '.continued', 'plugins');
 
@@ -667,8 +1109,14 @@ export class ContinuedSidebarProvider implements vscode.WebviewViewProvider {
                 }
                 if (!name.endsWith('.js') && !name.endsWith('.cjs')) {continue;}
                 try {
-                    const pluginPath = vscode.Uri.joinPath(pluginDir, name).fsPath;
-                    const moduleUrl = require.resolve(pluginPath);
+                    const uri = vscode.Uri.joinPath(pluginDir, name);
+                    const contents = await vscode.workspace.fs.readFile(uri);
+                    if (!await this._confirmPluginLoad(name, uri, contents)) {
+                        this._log.appendLine(`[${new Date().toISOString()}] plugin ${name} was not loaded (not approved)`);
+                        continue;
+                    }
+
+                    const moduleUrl = require.resolve(uri.fsPath);
                     delete require.cache[moduleUrl];
                     const module = require(moduleUrl);
 
@@ -1176,8 +1624,17 @@ module.exports.tool = {
     /** Read-only actions never need approval: built-in observers plus plugin tools flagged `readOnly`. */
     private _isReadOnly(action: AgentAction): boolean {
         if (isReadOnlyAction(action)) { return true; }
-        if (action.type === 'use-tool') { return !!this._pluginRegistry?.getTool(action.tool)?.readOnly; }
+        if (action.type === 'use-tool') {
+            const tool = this._pluginRegistry?.getTool(action.tool);
+            // A tool that sends data out is never read-only, even if it also declares readOnly.
+            return !!tool?.readOnly && !tool?.egress;
+        }
         return false;
+    }
+
+    /** True when the action can carry workspace content off the machine. */
+    private _sendsDataOut(action: AgentAction): boolean {
+        return action.type === 'use-tool' && !!this._pluginRegistry?.getTool(action.tool)?.egress;
     }
 
     /** Snapshot files a plugin tool declares it will touch, so the change can be reverted. */
@@ -1232,7 +1689,8 @@ module.exports.tool = {
     private _runActionsWithOutcome(): Array<{ action: AgentAction; ok: boolean; output: string }> {
         let lastUserIdx = -1;
         for (let i = this._chatHistory.length - 1; i >= 0; i--) {
-            if (this._chatHistory[i].role === 'user') { lastUserIdx = i; break; }
+            // A note sent during the run is part of the run, not the start of a new one.
+            if (this._chatHistory[i].role === 'user' && !isSteeringNote(this._chatHistory[i].content)) { lastUserIdx = i; break; }
         }
         const entries = this._chatHistory.slice(lastUserIdx + 1);
         const out: Array<{ action: AgentAction; ok: boolean; output: string }> = [];
@@ -1337,6 +1795,7 @@ ${pluginSection}
 6. Use final-answer only when the whole task is done (every file processed), or when you are blocked. In the message, explain in Markdown what you did or what is missing.
 7. If a tool result starts with BLOCKED, FAILED or DECLINED, that action was NOT done. Fix it (for a blocked write: use the file content in the result and write-file again) or report the problem in final-answer. Never claim in final-answer that something was done unless a tool result confirmed it.
 8. Keep run-command usage to build/test/inspection commands; use write-file and delete-file for file changes.
+9. A message starting with "[USER NOTE during the run]" was sent by the user while you were working: follow it from now on, even if it changes or narrows the task.
 
 ## EXAMPLE
 User: Add a comment to the top of src/foo.ts
@@ -1362,7 +1821,8 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
         return this._llm.completeDetailed(model, this._buildAgentSystemPrompt(), history, {
             jsonMode: true,
             signal,
-            timeoutMs: this._cfg<number>('agent.modelTimeoutMs', 120000)
+            timeoutMs: this._cfg<number>('agent.modelTimeoutMs', 600000),
+            stallTimeoutMs: this._cfg<number>('agent.modelStallTimeoutMs', 90000)
         });
     }
 
@@ -1381,6 +1841,14 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
         const all = this._runActionsWithOutcome();
         const last = all[all.length - 1];
         return !!last && !last.ok;
+    }
+
+    /** How many of the most recent actions in this run failed, were blocked or were declined, without a success in between. */
+    private _runConsecutiveFailures(): number {
+        const all = this._runActionsWithOutcome();
+        let count = 0;
+        for (let i = all.length - 1; i >= 0 && !all[i].ok; i--) { count++; }
+        return count;
     }
 
     /** Files the model read in this run but never successfully wrote. */
@@ -1416,11 +1884,16 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
         if (this._agentAbort) { this._agentAbort.abort(); }
         this._agentAbort = new AbortController();
         this._agentIteration = 0;
+        this._agentRunStartedAt = Date.now();
+        this._agentPausedMs = 0;
+        this._approvalWaitStartedAt = 0;
         this._lastActionKey = '';
         this._pendingApproval = null;
         this._runKnownFiles = new Set();
         this._completionChallengeSent = false;
-        this._agentTask = prompt;
+        this._agentTask = this._pendingTask || prompt;
+        this._pendingTask = '';
+        this._liveMode = mode;
         this._agentCurrentFile = currentFile;
         this._guardrails = this._createGuardrails();
         this._log.appendLine(`[${new Date().toISOString()}] ▶ agent run (${mode}, ${model}): ${prompt.slice(0, 200).replace(/\s+/g, ' ')}`);
@@ -1465,9 +1938,16 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
         }
 
         this._agentIteration++;
-        const limit = this._guardrails.canExecuteOperation(this._agentIteration);
+        const limit = this._guardrails.canExecuteOperation(this._agentIteration, Date.now() - this._agentRunStartedAt - this._agentPausedMs);
         if (!limit.allowed) {
-            this._finishAgentRun(view, mode, `⚠️ ${limit.reason} Send another message to continue where it left off, or raise \`continued.agent.maxIterations\` in Settings.`);
+            const timeBudget = /time budget/.test(limit.reason ?? '');
+            const setting = timeBudget ? 'continued.agent.maxRunMinutes' : 'continued.agent.maxIterations';
+            this._finishAgentRun(view, mode, `⚠️ ${limit.reason} Send another message to continue where it left off, or raise \`${setting}\` in Settings (0 removes the ${timeBudget ? 'time' : 'step'} limit).`);
+            return;
+        }
+        const thrashing = this._guardrails.canContinueAfterFailures(this._runConsecutiveFailures());
+        if (!thrashing.allowed) {
+            this._finishAgentRun(view, mode, `⚠️ ${thrashing.reason} Check the failed actions above, then send another message with guidance (or raise \`continued.agent.maxConsecutiveFailures\` in Settings).`);
             return;
         }
 
@@ -1482,8 +1962,14 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
         let lastReasoning = '';
         let lastError = '';
 
+        // A timeout, stall or dropped connection is retried once per attempt before the run
+        // is given up: on a shared gateway or a busy local machine these are usually one-offs.
+        const MAX_TRANSIENT_RETRIES = 1;
+        const TRANSIENT = /timed out|stopped sending|exceeded the .* cap|fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up|network error|terminated|\((?:429|500|502|503|504)\)/i;
+        let transientRetries = 0;
+
         for (let attempt = 0; attempt <= MAX_CORRECTIONS; attempt++) {
-            if (attempt > 0) {
+            if (attempt > 0 && correction.length < attempt * 2) {
                 const stoppedAfterThinking = !lastText && !!lastReasoning;
                 view.webview.postMessage({
                     type: 'agentWorking',
@@ -1512,7 +1998,16 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
                 lastError = (err as Error).message ?? String(err);
                 lastText = '';
                 lastReasoning = '';
-                // Network / auth / timeout problems will not be fixed by a correction message.
+                if (TRANSIENT.test(lastError) && transientRetries < MAX_TRANSIENT_RETRIES) {
+                    transientRetries++;
+                    this._log.appendLine(`[${new Date().toISOString()}] transient model error at step ${this._agentIteration} (retry ${transientRetries}/${MAX_TRANSIENT_RETRIES}): ${lastError.slice(0, 200)}`);
+                    view.webview.postMessage({ type: 'agentWorking', step: this._agentIteration, label: `model call failed (${lastError.slice(0, 60)}…), retrying once…` });
+                    await this._pause(3000, run.signal);
+                    if (run.signal.aborted) { this._finishAgentRun(view, mode, null); return; }
+                    attempt--;   // repeat this attempt; no correction message is added for it
+                    continue;
+                }
+                // Auth, quota and repeated network problems will not be fixed by a correction message.
                 if (!/empty response/i.test(lastError)) {
                     this._finishAgentRun(view, mode, `Agent error: ${lastError}`);
                     return;
@@ -1565,6 +2060,10 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
             }
         }
 
+        // A `use-tool` aimed at a dedicated tool becomes its native action, so the guardrail and
+        // approval checks below (which key on the action type) cannot be stepped around.
+        action = canonicalizeAction(action);
+
         // Stop if the model is stuck repeating itself.
         const actionKey = JSON.stringify(action);
         if (action.type !== 'final-answer' && actionKey === this._lastActionKey) {
@@ -1593,21 +2092,22 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
     }
 
     /** Run guardrails, then execute directly or ask the user for approval. */
-    private async _dispatchAgentAction(action: AgentAction, model: string, mode: AgentRunMode, view: vscode.WebviewView): Promise<void> {
+    private async _dispatchAgentAction(rawAction: AgentAction, model: string, mode: AgentRunMode, view: vscode.WebviewView): Promise<void> {
+        const action = canonicalizeAction(rawAction);
         const blockedReason = await this._guardrailCheck(action);
         if (blockedReason) {
             await this._completeAgentAction(action, `BLOCKED: ${blockedReason}`, model, mode, view);
             return;
         }
 
-        const needsApproval = !this._isReadOnly(action) && (
-            mode === 'agent' ||
-            (action.type === 'run-command' && this._guardrails.requiresExplicitApproval(action.command))
-        );
+        const outsideDocument = this._activeDocumentOutsideWorkspace(action);
+        mode = this._liveMode;
+        const needsApproval = this._needsApproval(action, mode, outsideDocument);
 
         if (needsApproval) {
             this._pendingApproval = { action, model, mode };
-            this._requestApproval(view, action);
+            this._approvalWaitStartedAt = Date.now();
+            this._requestApproval(view, action, outsideDocument);
             view.webview.postMessage({ type: 'agentWorking', step: this._agentIteration, label: 'waiting for your approval…' });
             return;
         }
@@ -1635,6 +2135,71 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
         await this._runAgentStep(model, mode, view);
     }
 
+    /**
+     * The one read permitted outside the workspace: the document currently open in the editor.
+     *
+     * The containment rule exists to stop the *model* choosing to read a path such as
+     * `~/.ssh/id_rsa`. When a harness step reads `{{activeFile}}` the path did not come from the
+     * model — the author wrote the template and the user chose the file by opening it — so
+     * blocking it protects against nothing while defeating "Explain the active file". The read
+     * is therefore allowed for exactly that document, never silently: it is approval-gated so
+     * the boundary crossing is seen and recorded, and the hard forbidden list still applies.
+     */
+    /** Agent mode asks for every change; Auto-Edit asks only for actions that send data out or run a risky command. */
+    private _needsApproval(action: AgentAction, mode: AgentRunMode, outsideDocument: vscode.TextDocument | null): boolean {
+        return outsideDocument !== null || (!this._isReadOnly(action) && (
+            mode === 'agent' ||
+            this._sendsDataOut(action) ||
+            (action.type === 'run-command' && this._guardrails.requiresExplicitApproval(action.command))
+        ));
+    }
+
+    /** Continue the run after an approval answer; `allow` false records a DECLINED result. */
+    private async _resumeAfterApproval(allow: boolean, view: vscode.WebviewView): Promise<void> {
+        const pending = this._pendingApproval;
+        this._pendingApproval = null;
+        if (this._approvalWaitStartedAt) {
+            this._agentPausedMs += Date.now() - this._approvalWaitStartedAt;
+            this._approvalWaitStartedAt = 0;
+        }
+        if (!pending) { return; }
+        if (this._agentAbort?.signal.aborted) {
+            this._finishAgentRun(view, pending.mode, null);
+            return;
+        }
+        if (allow) {
+            view.webview.postMessage({ type: 'agentWorking', step: this._agentIteration, label: `running ${pending.action.type}…` });
+            const output = await this._executeAgentAction(pending.action);
+            await this._completeAgentAction(pending.action, output, pending.model, this._liveMode, view);
+        } else {
+            await this._completeAgentAction(
+                pending.action,
+                'DECLINED: the user did not approve this action. Choose a different approach, or reply with final-answer explaining what remains to be done.',
+                pending.model,
+                this._liveMode,
+                view
+            );
+        }
+    }
+
+    private _activeDocumentOutsideWorkspace(action: AgentAction): vscode.TextDocument | null {
+        if (action.type !== 'read-file') { return null; }
+        const editor = vscode.window.activeTextEditor;
+        const root = this._workspaceRoot();
+        if (!editor || !root || editor.document.isUntitled || editor.document.uri.scheme !== 'file') { return null; }
+        const target = path.resolve(root, action.path);
+        if (path.resolve(editor.document.uri.fsPath) !== target) { return null; }
+        const relative = path.relative(root, target);
+        if (!(relative.startsWith('..') || path.isAbsolute(relative))) { return null; }   // inside: ordinary read
+        if (!this._guardrails.isForbiddenPath(target).safe) { return null; }
+        return editor.document;
+    }
+
+    private _outsideReadDetail(document: vscode.TextDocument): string {
+        const model = this._getScopedState<string>('continued_last_model') || 'the selected model';
+        return `The active file is outside the open workspace. Its contents will be read from the editor and sent to ${model}.`;
+    }
+
     private async _guardrailCheck(action: AgentAction, enforceReadBeforeWrite = true): Promise<string | null> {
         const root = this._workspaceRoot();
         if (!root) { return 'No workspace folder is open.'; }
@@ -1643,6 +2208,7 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
             case 'read-file':
             case 'write-file':
             case 'delete-file': {
+                if (this._activeDocumentOutsideWorkspace(action)) { return null; }
                 const verdict = this._guardrails.isSafeFilePath(action.path, root);
                 if (!verdict.safe) { return verdict.reason ?? 'Path rejected.'; }
                 // Never let the model overwrite a file it has not looked at in this run. Instead of
@@ -1673,7 +2239,16 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
         }
     }
 
-    private _requestApproval(view: vscode.WebviewView, action: AgentAction) {
+    private _requestApproval(view: vscode.WebviewView, action: AgentAction, outsideDocument: vscode.TextDocument | null = null) {
+        if (outsideDocument) {
+            view.webview.postMessage({
+                type: 'requestCommandApproval',
+                kind: 'read-outside',
+                command: outsideDocument.uri.fsPath,
+                detail: this._outsideReadDetail(outsideDocument)
+            });
+            return;
+        }
         switch (action.type) {
             case 'write-file':
                 view.webview.postMessage({ type: 'requestEditApproval', filename: action.path, lines: action.content.split('\n').length, preview: action.content.slice(0, 1500) });
@@ -1703,6 +2278,14 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
         try {
             switch (action.type) {
                 case 'read-file': {
+                    const outsideDocument = this._activeDocumentOutsideWorkspace(action);
+                    if (outsideDocument) {
+                        // Approved above. Read the editor buffer itself, unsaved edits included; the
+                        // file tool would refuse the path, correctly, since it is outside the workspace.
+                        this._log.appendLine(`[${new Date().toISOString()}] read of active document outside the workspace approved: ${outsideDocument.uri.fsPath}`);
+                        this._runKnownFiles.add(this._normalizeRelativePath(action.path));
+                        return outsideDocument.getText();
+                    }
                     const content = await this._runRegistryTool('read-file', { filePath: action.path });
                     this._runKnownFiles.add(this._normalizeRelativePath(action.path));
                     return content;
@@ -1913,6 +2496,10 @@ Files (partial): ${this._cachedWorkspaceSummary || '(not scanned)'}`;
                 parts.push(`[Attached image "${file.name}" — image input is not supported yet, so it was not included.]`);
                 continue;
             }
+            if (file.isPdf) {
+                parts.push(`[Attached PDF "${file.name}" — PDF text extraction is not available in VS Code yet, so it was not included. Convert it to text first (e.g. pdftotext) and attach that.]`);
+                continue;
+            }
             const content = String(file.content ?? '');
             const capped = content.length > 60000 ? `${content.slice(0, 60000)}\n...[truncated]` : content;
             parts.push(`[Attached file: ${file.name}]\n\`\`\`\n${capped}\n\`\`\``);
@@ -1977,6 +2564,10 @@ Write plain Markdown. Do not output JSON actions or tool tags.`
         }
 
         const prompt = this._composePrompt(userPrompt, attachedFiles);
+        // The run's task line names the attachments; their bodies stay in the user message only.
+        this._pendingTask = attachedFiles.length
+            ? `${userPrompt.trim() || 'The user attached file(s) without further instructions: use their contents to do what the conversation asked for.'} [attached: ${attachedFiles.slice(0, 10).map(f => f.name).join(', ')} — contents are in the user message]`
+            : userPrompt;
         this._chatHistory.push({ role: 'user', content: prompt });
 
         if (await this._tryHandlePluginChatCommand(prompt, mode, view)) {
@@ -2007,7 +2598,11 @@ Write plain Markdown. Do not output JSON actions or tool tags.`
             localResourceRoots: [this._context.extensionUri]
         };
 
-        webviewView.webview.html = generateChatViewHTML();
+        // A fresh nonce per render; the policy in the document only admits scripts carrying it.
+        webviewView.webview.html = generateChatViewHTML({
+            nonce: crypto.randomBytes(16).toString('base64'),
+            cspSource: webviewView.webview.cspSource
+        });
 
         // Keep the "current file" indicator in sync with the active editor
         const sendCurrentFile = () => {
@@ -2034,11 +2629,11 @@ Write plain Markdown. Do not output JSON actions or tool tags.`
                     break;
                 }
                 case 'getModels': {
-                    const modelNames = await this._llm.listModels();
+                    const models = await this._llm.listModels();
 
                     const savedModel = this._getScopedState<string>('continued_last_model') || 'llama3';
                     const savedMode = this._getScopedState<string>('continued_last_mode') || 'agent';
-                    webviewView.webview.postMessage({ type: 'setModels', models: modelNames, savedModel, savedMode });
+                    webviewView.webview.postMessage({ type: 'setModels', models, savedModel, savedMode });
                     webviewView.webview.postMessage({ type: 'renderSessions', sessions });
 
                     // Auto-restore last active session on startup
@@ -2101,6 +2696,18 @@ Write plain Markdown. Do not output JSON actions or tool tags.`
                     const mode = String(data.mode || '').trim();
                     if (mode && ['chat', 'agent', 'agent-auto', 'plan'].includes(mode)) {
                         this._setScopedState('continued_last_mode', mode);
+                    }
+                    // A running agent follows the dropdown from the next action on. A prompt already on
+                    // screen is answered for the user when the new mode would not have asked at all.
+                    const runActive = !!this._agentAbort && !this._agentAbort.signal.aborted;
+                    if (runActive && (mode === 'agent' || mode === 'agent-auto') && mode !== this._liveMode) {
+                        this._liveMode = mode;
+                        this._log.appendLine(`[${new Date().toISOString()}] mode switched to ${mode} during the run`);
+                        const pending = this._pendingApproval;
+                        if (pending && !this._needsApproval(pending.action, mode, this._activeDocumentOutsideWorkspace(pending.action))) {
+                            webviewView.webview.postMessage({ type: 'agentWorking', step: this._agentIteration, label: `switched to Auto-Edit — running ${pending.action.type}…` });
+                            await this._resumeAfterApproval(true, webviewView);
+                        }
                     }
                     break;
                 }
@@ -2234,34 +2841,9 @@ Write plain Markdown. Do not output JSON actions or tool tags.`
                 case 'respondToEdit':
                 case 'respondToDelete':
                 case 'respondToCommand': {
-                    if (this._approvalWaiter) {
-                        // A harness step is waiting on this answer.
-                        const waiter = this._approvalWaiter;
-                        this._approvalWaiter = null;
-                        waiter(data.action === 'Allow');
-                        break;
-                    }
-                    const pending = this._pendingApproval;
-                    this._pendingApproval = null;
-                    if (!pending) { break; }
-                    if (this._agentAbort?.signal.aborted) {
-                        this._finishAgentRun(webviewView, pending.mode, null);
-                        break;
-                    }
-
-                    if (data.action === 'Allow') {
-                        webviewView.webview.postMessage({ type: 'agentWorking', step: this._agentIteration, label: `running ${pending.action.type}…` });
-                        const output = await this._executeAgentAction(pending.action);
-                        await this._completeAgentAction(pending.action, output, pending.model, pending.mode, webviewView);
-                    } else {
-                        await this._completeAgentAction(
-                            pending.action,
-                            'DECLINED: the user did not approve this action. Choose a different approach, or reply with final-answer explaining what remains to be done.',
-                            pending.model,
-                            pending.mode,
-                            webviewView
-                        );
-                    }
+                    // A harness step waiting on this answer takes precedence over the agent loop.
+                    if (this._resolveCurrentApproval(data.action === 'Allow')) { break; }
+                    await this._resumeAfterApproval(data.action === 'Allow', webviewView);
                     break;
                 }
 
@@ -2379,16 +2961,18 @@ Write plain Markdown. Do not output JSON actions or tool tags.`
                     }
                     break;
                 }
-                case 'harnessOpenFile': {
-                    const uri = harnessFileUri(String(data.id || ''));
-                    if (uri) {
-                        try {
-                            const doc = await vscode.workspace.openTextDocument(uri);
-                            await vscode.window.showTextDocument(doc, { preview: false });
-                        } catch (error) {
-                            vscode.window.showErrorMessage(`Could not open harness file: ${(error as Error).message}`);
-                        }
+                case 'harnessExport': {
+                    const id = String(data.id || '');
+                    const def = this._harnesses.get(id);
+                    if (!def) {
+                        webviewView.webview.postMessage({ type: 'harnessError', message: `Harness "${id}" not found.` });
+                        break;
                     }
+                    await this._exportHarness(def, data.format === 'markdown' ? 'markdown' : data.format === 'cwl' ? 'cwl' : 'json');
+                    break;
+                }
+                case 'harnessImport': {
+                    await this._importHarness(webviewView);
                     break;
                 }
                 case 'harnessRun': {
@@ -2405,6 +2989,10 @@ Write plain Markdown. Do not output JSON actions or tool tags.`
                     const model = String(data.model || this._getScopedState<string>('continued_last_model') || 'llama3');
                     const mode = String(data.mode || this._getScopedState<string>('continued_last_mode') || 'agent');
                     try {
+                        if (data.container) {
+                            await this._runHarnessInContainer(def, input, model, mode, webviewView);
+                            break;
+                        }
                         await this._runHarness(def, input, model, mode, webviewView, { fromChat: true });
                     } catch (error) {
                         webviewView.webview.postMessage({ type: 'harnessError', message: (error as Error).message });
@@ -2414,7 +3002,7 @@ Write plain Markdown. Do not output JSON actions or tool tags.`
                 }
                 case 'harnessStop': {
                     this._harnessAbort?.abort();
-                    this._approvalWaiter?.(false);
+                    this._drainApprovals();
                     break;
                 }
 
@@ -2422,7 +3010,7 @@ Write plain Markdown. Do not output JSON actions or tool tags.`
                     const hadRun = Boolean(this._agentAbort && !this._agentAbort.signal.aborted);
                     this._agentAbort?.abort();
                     this._harnessAbort?.abort();
-                    this._approvalWaiter?.(false);
+                    this._drainApprovals();
                     this._pendingApproval = null;
                     this._agentIteration = 0;
                     this._lastActionKey = '';
@@ -2449,6 +3037,20 @@ Write plain Markdown. Do not output JSON actions or tool tags.`
                     break;
                 }
 
+                case 'steerAgent': {
+                    const note = String(data.value || '').trim();
+                    const runActive = !!this._agentAbort && !this._agentAbort.signal.aborted;
+                    if (!note) { break; }
+                    if (!runActive) {
+                        webviewView.webview.postMessage({ type: 'assistantResponse', content: 'No agent run is in progress, so this note was not delivered. Send it as a normal message.' });
+                        break;
+                    }
+                    this._chatHistory.push({ role: 'user', content: `${STEER_PREFIX} ${note}` });
+                    this._persistSession(this._liveMode);
+                    this._log.appendLine(`[${new Date().toISOString()}] user note during run: ${note.slice(0, 200).replace(/\s+/g, ' ')}`);
+                    webviewView.webview.postMessage({ type: 'agentWorking', step: this._agentIteration, label: 'note received — the agent sees it at its next step…' });
+                    break;
+                }
                 case 'sendPrompt': {
                     await this._handleSendPrompt(
                         String(data.value ?? ''),
@@ -2467,8 +3069,8 @@ Write plain Markdown. Do not output JSON actions or tool tags.`
     public async triggerModelRefresh() {
         if (!this._view) {return;}
 
-        const modelNames = await this._llm.listModels();
+        const models = await this._llm.listModels();
 
-        this._view.webview.postMessage({ type: 'setModels', models: modelNames });
+        this._view.webview.postMessage({ type: 'setModels', models });
     }
 }

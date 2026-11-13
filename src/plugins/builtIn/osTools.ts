@@ -103,6 +103,9 @@ export const httpFetchTool: ITool = {
     enabled: false,
     source: 'built-in',
     category: 'tool',
+    // Reaching an arbitrary URL is how workspace content could leave the machine, so this is
+    // approved every time rather than only in Agent mode.
+    egress: true,
     args: [
         { name: 'url', description: 'http(s) URL', required: true },
         { name: 'maxChars', description: 'Output cap', default: '8000' },

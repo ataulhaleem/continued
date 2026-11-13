@@ -76,7 +76,33 @@ suite('AgentGuardrails — paths, limits, sanitizing', () => {
         assert.strictEqual(guard.canExecuteOperation(4).allowed, false);
         assert.strictEqual(guard.canRetry(1).allowed, true);
         assert.strictEqual(guard.canRetry(2).allowed, false);
-        assert.strictEqual(new AgentGuardrails().MAX_ITERATIONS, 20);
+        assert.strictEqual(new AgentGuardrails().MAX_ITERATIONS, 500);
+        const unlimitedSteps = new AgentGuardrails({ maxIterations: 0 });
+        assert.strictEqual(unlimitedSteps.MAX_ITERATIONS, 0);
+        assert.strictEqual(unlimitedSteps.canExecuteOperation(100000).allowed, true);
+    });
+
+    test('enforces the wall-clock budget independently of the step count', () => {
+        const timed = new AgentGuardrails({ maxIterations: 100, maxRunMs: 60000 });
+        assert.strictEqual(timed.MAX_RUN_MS, 60000);
+        assert.strictEqual(timed.canExecuteOperation(50, 59000).allowed, true);
+        assert.strictEqual(timed.canExecuteOperation(50, 61000).allowed, false);
+        assert.match(timed.canExecuteOperation(50, 61000).reason ?? '', /time budget/);
+        // A positive value below the floor is clamped; zero switches the budget off.
+        assert.strictEqual(new AgentGuardrails({ maxRunMs: 10 }).MAX_RUN_MS, 60000);
+        const unlimited = new AgentGuardrails({ maxRunMs: 0 });
+        assert.strictEqual(unlimited.MAX_RUN_MS, 0);
+        assert.strictEqual(unlimited.canExecuteOperation(5, 48 * 3600000).allowed, true);
+        assert.strictEqual(new AgentGuardrails().MAX_RUN_MS, 4 * 60 * 60000);
+        assert.match(new AgentGuardrails().canExecuteOperation(1, 5 * 3600000).reason ?? '', /4-hour time budget/);
+    });
+
+    test('stops after too many consecutive failed, blocked or declined actions', () => {
+        const strict = new AgentGuardrails({ maxConsecutiveFailures: 2 });
+        assert.strictEqual(strict.canContinueAfterFailures(0).allowed, true);
+        assert.strictEqual(strict.canContinueAfterFailures(1).allowed, true);
+        assert.strictEqual(strict.canContinueAfterFailures(2).allowed, false);
+        assert.strictEqual(new AgentGuardrails().MAX_CONSECUTIVE_FAILURES, 4);
     });
 
     test('masks secrets in output', () => {

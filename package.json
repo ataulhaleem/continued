@@ -1,20 +1,49 @@
 {
   "name": "continued",
-  "displayName": "continued",
-  "description": "drop in replacement for continue.dev",
-  "version": "1.0.1",
+  "displayName": "Continued – Local-first AI Agent (Ollama, Blablador)",
+  "description": "Local-first AI coding agent: chat and agent mode on Ollama models on your machine or an institutional endpoint such as Blablador, every action approval-gated, and reproducible workflow-harnesses exportable to CWL.",
+  "version": "1.1.0",
   "publisher": "AtaUlHaleem",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1b1f2a",
+    "theme": "dark"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Machine Learning",
+    "Education"
+  ],
+  "keywords": [
+    "ollama",
+    "local llm",
+    "ai agent",
+    "privacy",
+    "blablador"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/ataulhaleem/continued.git"
   },
+  "homepage": "https://github.com/ataulhaleem/continued#readme",
+  "bugs": {
+    "url": "https://github.com/ataulhaleem/continued/issues"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
-  "categories": [
-    "Other"
-  ],
   "main": "./dist/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In an untrusted workspace Continued does not load plugins from .continued/plugins/, because loading one runs its JavaScript in the extension host. Chat, the agent and the built-in plugins all work normally.",
+      "restrictedConfigurations": [
+        "continued.ollama.baseUrl"
+      ]
+    }
+  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -55,15 +84,33 @@
         },
         "continued.agent.maxIterations": {
           "type": "number",
-          "default": 20,
+          "default": 500,
+          "minimum": 0,
+          "description": "Maximum number of model/tool steps in one agent run before it pauses and asks you to continue. Set 0 for no step limit; the time budget, the consecutive-failure stop and the repeated-action stop still apply."
+        },
+        "continued.agent.maxRunMinutes": {
+          "type": "number",
+          "default": 240,
+          "minimum": 0,
+          "description": "How long one agent run may work before it pauses, in minutes (default 4 hours). Time spent waiting for your approval is not counted. Set 0 for no time limit; the step limit, the consecutive-failure stop and the repeated-action stop still apply."
+        },
+        "continued.agent.maxConsecutiveFailures": {
+          "type": "number",
+          "default": 4,
           "minimum": 1,
-          "description": "Maximum number of model/tool steps in one agent run before it stops and asks you to continue."
+          "description": "Stop the run after this many actions in a row failed, were blocked or were declined, instead of letting the model keep retrying."
         },
         "continued.agent.modelTimeoutMs": {
           "type": "number",
-          "default": 120000,
+          "default": 600000,
           "minimum": 5000,
-          "description": "Timeout in milliseconds for a single model call in agent mode."
+          "description": "Hard cap in milliseconds for a single model call in agent mode, including a long generation that is still producing tokens. A timeout or dropped connection is retried once before the run stops."
+        },
+        "continued.agent.modelStallTimeoutMs": {
+          "type": "number",
+          "default": 90000,
+          "minimum": 5000,
+          "description": "How long in milliseconds a model may send nothing (no tokens, no reasoning) before the call is treated as stalled. Catches a dead connection quickly without cutting off slow models that are still working."
         },
         "continued.agent.commandTimeoutMs": {
           "type": "number",
@@ -88,6 +135,24 @@
           "default": 40000,
           "minimum": 1000,
           "description": "Maximum characters of a read-file result passed back to the model."
+        },
+        "continued.container.podmanPath": {
+          "type": "string",
+          "default": "podman",
+          "description": "Podman executable used by \"Run in a container\". A bare name is looked up on PATH."
+        },
+        "continued.container.outputDir": {
+          "type": "string",
+          "default": ".continued/harness-runs",
+          "description": "Where container runs write their results (output.txt, run_record.json), relative to the workspace unless absolute. Each run gets its own timestamped folder."
+        },
+        "continued.container.extraPackages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra Debian packages to install in the container image, for tools the dependency analysis cannot see (for example when a command comes from the harness input)."
         }
       }
     }
@@ -103,9 +168,9 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "check-types": "tsc --noEmit",
-    "lint": "eslint src",
+    "lint": "eslint src core cli/src",
     "test": "vscode-test",
-    "test:unit": "npm run compile-tests && mocha --ui tdd out/test/agentActions.test.js out/test/agentGuardrails.test.js out/test/harnessEngine.test.js"
+    "test:unit": "npm run compile-tests && mocha --ui tdd out/src/test/agentActions.test.js out/src/test/agentGuardrails.test.js out/src/test/harnessEngine.test.js out/src/test/modelPicker.test.js out/src/test/portable.test.js out/src/test/cwl.test.js out/src/test/container.test.js out/src/test/modelBench.test.js out/src/test/repro.test.js out/src/test/conformance.test.js out/src/test/grounding.test.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.90.0",

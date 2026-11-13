@@ -17,7 +17,7 @@
 | **Full Reference** | [PLUGIN_ARCHITECTURE.md](PLUGIN_ARCHITECTURE.md) | 15 min |
 | **Visual Design** | [PLUGIN_ARCHITECTURE_DIAGRAMS.md](PLUGIN_ARCHITECTURE_DIAGRAMS.md) | 10 min |
 | **Technical Details** | [PLUGIN_IMPLEMENTATION_SUMMARY.md](PLUGIN_IMPLEMENTATION_SUMMARY.md) | 10 min |
-| **Template** | [.continued/plugins/exampleUserPlugin.ts](.continued/plugins/exampleUserPlugin.ts) | 2 min |
+| **Template** | [docs/example-plugin.js](docs/example-plugin.js) — copy into `.continued/plugins/` | 2 min |
 
 ---
 
@@ -54,7 +54,7 @@ src/
 ```
 .continued/
 └── plugins/
-    └── exampleUserPlugin.ts    # Template for custom tools
+    └── my-plugin.js           # your plugins (plain CommonJS .js, never .ts)
 ```
 
 ### Production Package
@@ -121,7 +121,7 @@ Example Plugins:          1
 
 ### For Plugin Developers
 ```
-1. Create .continued/plugins/myTool.ts
+1. Create .continued/plugins/myTool.js
    ↓
 2. Export an ITool object:
    export const myTool: ITool = {
@@ -250,7 +250,7 @@ Total Documentation:                     (56.2 KB)
 
 ### Example (1 New File)
 ```
-.continued/plugins/exampleUserPlugin.ts   (2.2 KB)
+docs/example-plugin.js   — copy into .continued/plugins/
 ```
 
 ---
@@ -301,7 +301,7 @@ Total Documentation:                     (56.2 KB)
 ✓ PLUGIN_ARCHITECTURE.md - API reference
 ✓ PLUGIN_ARCHITECTURE_DIAGRAMS.md - Visual design
 ✓ PLUGIN_IMPLEMENTATION_SUMMARY.md - Technical details
-✓ exampleUserPlugin.ts - Working template
+✓ docs/example-plugin.js - Working template
 ```
 
 ---

@@ -35,6 +35,13 @@ export interface IPlugin {
   /** Tools that only inspect the workspace: never ask for approval, even in Agent mode. */
   readOnly?: boolean;
   /**
+   * The tool sends data off the machine. `readOnly` means "does not change the workspace",
+   * which is not the same as "safe to run unattended": a tool that can reach an arbitrary URL
+   * can carry whatever the agent has read with it. Egress tools always ask, in every mode, and
+   * are never treated as read-only.
+   */
+  egress?: boolean;
+  /**
    * For tools that change files: return the workspace-relative paths the call will touch.
    * The host snapshots them before execution so the change shows up in the Agent Changes
    * panel and can be reverted.

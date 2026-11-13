@@ -13,6 +13,39 @@ export interface ChatMessage {
 
 export type Provider = 'ollama' | 'openai' | 'gemini' | 'anthropic' | 'blablador';
 
+/** A model offered in the picker, with whatever the provider tells us about it. */
+export interface ModelInfo {
+    /** Prefixed id actually sent to the provider, e.g. `openai/gpt-4o`. */
+    id: string;
+    /** Short name shown in the list. */
+    label: string;
+    provider: Provider;
+    /** True when the model runs on the user's own machine. */
+    local: boolean;
+    /** One compact line: parameters, quantisation, size, context window. */
+    detail?: string;
+    /** Longer prose from the provider, when it offers any. */
+    description?: string;
+    contextTokens?: number;
+    sizeBytes?: number;
+}
+
+export function formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) { return ''; }
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+    return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+
+export function formatTokens(tokens: number): string {
+    if (!Number.isFinite(tokens) || tokens <= 0) { return ''; }
+    if (tokens >= 1000000) { return `${(tokens / 1000000).toFixed(tokens % 1000000 === 0 ? 0 : 1)}M`; }
+    if (tokens >= 1000) { return `${Math.round(tokens / 1000)}K`; }
+    return String(tokens);
+}
+
 export interface ModelCallOptions {
     jsonMode?: boolean;
     signal?: AbortSignal;
@@ -96,7 +129,11 @@ export class LlmClient {
             case 'ollama': {
                 const body: Record<string, unknown> = { model: pureModel || 'llama3', messages: withSystem, stream };
                 if (options.jsonMode) { body.format = 'json'; }
-                if (options.maxTokens) { body.options = { num_predict: options.maxTokens }; }
+                // Ollama's default context window (a few thousand tokens) silently truncates a long
+                // document; size it to the request instead, within what a workstation can hold.
+                const promptChars = withSystem.reduce((n, m) => n + m.content.length, 0);
+                const numCtx = Math.min(32768, Math.max(8192, Math.ceil((promptChars / 3 + (options.maxTokens ?? 2048)) / 1024) * 1024));
+                body.options = { num_ctx: numCtx, ...(options.maxTokens ? { num_predict: options.maxTokens } : {}) };
                 return { provider, url: `${(await this.ollamaBaseUrl()).replace(/\/+$/, '')}/api/chat`, headers, body };
             }
             case 'openai': {
@@ -145,7 +182,7 @@ export class LlmClient {
 
     private async send(request: PreparedRequest, options: ModelCallOptions): Promise<Response> {
         const controller = new AbortController();
-        const timeoutMs = options.timeoutMs ?? 120000;
+        const timeoutMs = options.timeoutMs ?? 600000;
         const timeoutId = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
         const onExternalAbort = () => controller.abort(new Error('cancelled'));
         if (options.signal) {
@@ -308,49 +345,140 @@ export class LlmClient {
         return visible;
     }
 
-    async listModels(): Promise<string[]> {
-        let names: string[] = [];
+    /**
+     * Collect the models on offer: Ollama plus every cloud provider with a key configured.
+     *
+     * Each provider is asked for whatever it knows about its models — Ollama reports parameter
+     * count, quantisation and on-disk size; Gemini reports a context window and a description;
+     * Anthropic reports a display name — so the picker can say more than a bare id. A provider
+     * that fails or returns an unexpected shape contributes a plain entry rather than breaking
+     * the list.
+     */
+    /** Why providers with a key returned no list in the last listModels() call, one line each. */
+    listProblems: string[] = [];
+
+    async listModels(): Promise<ModelInfo[]> {
+        const models: ModelInfo[] = [];
+        this.listProblems = [];
+
         try {
-            const res = await fetch(`${(await this.ollamaBaseUrl()).replace(/\/+$/, '')}/api/tags`, { signal: AbortSignal.timeout(8000) });
-            const json = await res.json() as { models: Array<{ name: string }> };
-            names = json.models.map(m => m.name);
-        } catch {
-            names = [];
+            const base = (await this.ollamaBaseUrl()).replace(/\/+$/, '');
+            const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(8000) });
+            const json = await res.json() as {
+                models?: Array<{
+                    name?: string;
+                    size?: number;
+                    details?: { family?: string; parameter_size?: string; quantization_level?: string };
+                }>;
+            };
+            for (const m of json.models ?? []) {
+                if (!m?.name) { continue; }
+                const d = m.details ?? {};
+                models.push({
+                    id: m.name,
+                    label: m.name,
+                    provider: 'ollama',
+                    local: true,
+                    detail: [d.parameter_size, d.quantization_level, formatBytes(m.size ?? 0)].filter(Boolean).join(' · '),
+                    description: d.family ? `${d.family} family · runs on this machine` : 'Runs on this machine',
+                    sizeBytes: m.size
+                });
+            }
+        } catch (error) {
+            // Ollama is not running or not reachable; the cloud providers below may still answer.
+            this.log(`models: Ollama not reachable (${(error as Error).message})`);
         }
-        const tryList = async (name: 'openai' | 'gemini' | 'anthropic' | 'blablador', fn: (key: string) => Promise<string[]>, fallback: string[]) => {
+
+        const cloud = (provider: Exclude<Provider, 'ollama'>, id: string, extra: Partial<ModelInfo> = {}): ModelInfo => ({
+            id: `${provider}/${id}`,
+            label: id,
+            provider,
+            local: false,
+            ...extra
+        });
+
+        const addCloud = async (
+            provider: Exclude<Provider, 'ollama'>,
+            fetchModels: (key: string) => Promise<ModelInfo[]>,
+            fallback: ModelInfo[]
+        ) => {
             try {
-                const key = await this.secrets(name);
+                const key = await this.secrets(provider);
                 if (!key) { return; }
-                names.push(...await fn(key));
-            } catch {
-                names.push(...fallback);
+                models.push(...await fetchModels(key));
+            } catch (error) {
+                const why = (error as Error).message || String(error);
+                this.log(`models: ${provider} list failed (${why})`);
+                this.listProblems.push(`${provider}: ${/^\d{3}$/.test(why) ? `HTTP ${why}` : why}`);
+                models.push(...fallback);
             }
         };
-        await tryList('openai', async key => {
-            const res = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10000) });
+
+        await addCloud('openai', async key => {
+            const res = await fetch('https://api.openai.com/v1/models', {
+                headers: { Authorization: `Bearer ${key}` },
+                signal: AbortSignal.timeout(10000)
+            });
             if (!res.ok) { throw new Error(String(res.status)); }
-            const json = await res.json() as { data: Array<{ id: string }> };
-            return json.data.map(m => m.id).filter(id => id.startsWith('gpt') || id.startsWith('o')).sort().map(id => `openai/${id}`);
-        }, ['openai/gpt-4o-mini']);
-        await tryList('gemini', async key => {
-            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(10000) });
+            const json = await res.json() as { data?: Array<{ id?: string; owned_by?: string }> };
+            return (json.data ?? [])
+                .filter(m => !!m.id && (m.id.startsWith('gpt') || m.id.startsWith('o')))
+                .sort((a, b) => a.id!.localeCompare(b.id!))
+                .map(m => cloud('openai', m.id!, { detail: m.owned_by ? `by ${m.owned_by}` : undefined }));
+        }, [cloud('openai', 'gpt-4o-mini', { detail: 'model list unavailable' })]);
+
+        await addCloud('gemini', async key => {
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`, {
+                signal: AbortSignal.timeout(10000)
+            });
             if (!res.ok) { throw new Error(String(res.status)); }
-            const json = await res.json() as { models: Array<{ name: string }> };
-            return json.models.map(m => m.name.replace('models/', '')).filter(n => n.startsWith('gemini-')).map(n => `gemini/${n}`);
-        }, ['gemini/gemini-2.5-flash']);
-        await tryList('anthropic', async key => {
-            const res = await fetch('https://api.anthropic.com/v1/models', { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, signal: AbortSignal.timeout(10000) });
+            const json = await res.json() as {
+                models?: Array<{ name?: string; displayName?: string; description?: string; inputTokenLimit?: number; supportedGenerationMethods?: string[] }>;
+            };
+            return (json.models ?? [])
+                .filter(m => !!m.name && (m.supportedGenerationMethods ?? ['generateContent']).includes('generateContent'))
+                .map(m => {
+                    const id = m.name!.replace(/^models\//, '');
+                    const context = formatTokens(m.inputTokenLimit ?? 0);
+                    return cloud('gemini', id, {
+                        label: m.displayName || id,
+                        detail: context ? `${context} context` : undefined,
+                        description: m.description,
+                        contextTokens: m.inputTokenLimit
+                    });
+                })
+                .filter(m => m.id.includes('gemini'));
+        }, [cloud('gemini', 'gemini-2.5-flash', { detail: 'model list unavailable' })]);
+
+        await addCloud('anthropic', async key => {
+            const res = await fetch('https://api.anthropic.com/v1/models', {
+                headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+                signal: AbortSignal.timeout(10000)
+            });
             if (!res.ok) { throw new Error(String(res.status)); }
-            const json = await res.json() as { data: Array<{ id: string }> };
-            return json.data.map(m => m.id).filter(id => id.includes('claude')).map(id => `anthropic/${id}`);
-        }, ['anthropic/claude-opus-5']);
-        await tryList('blablador', async key => {
-            const res = await fetch('https://api.blablador.fz-juelich.de/v1/models', { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10000) });
+            const json = await res.json() as { data?: Array<{ id?: string; display_name?: string }> };
+            return (json.data ?? [])
+                .filter(m => !!m.id && m.id.includes('claude'))
+                .map(m => cloud('anthropic', m.id!, { label: m.display_name || m.id!, detail: m.display_name ? m.id : undefined }));
+        }, [cloud('anthropic', 'claude-opus-5', { detail: 'model list unavailable' })]);
+
+        await addCloud('blablador', async key => {
+            const res = await fetch('https://api.blablador.fz-juelich.de/v1/models', {
+                headers: { Authorization: `Bearer ${key}` },
+                signal: AbortSignal.timeout(10000)
+            });
             if (!res.ok) { throw new Error(String(res.status)); }
-            const json = await res.json() as { data: Array<{ id: string }> };
-            return json.data.map(m => `blablador/${m.id}`);
+            const json = await res.json() as { data?: Array<{ id?: string; owned_by?: string }> };
+            return (json.data ?? [])
+                .filter(m => !!m.id)
+                .map(m => cloud('blablador', m.id!, { detail: m.owned_by ? `by ${m.owned_by}` : undefined, description: 'Hosted at Jülich Supercomputing Centre' }));
         }, []);
-        if (names.length === 0) { names.push('llama3'); }
-        return [...new Set(names)];
+
+        if (models.length === 0) {
+            models.push({ id: 'llama3', label: 'llama3', provider: 'ollama', local: true, detail: 'not pulled yet', description: 'Start Ollama and run `ollama pull llama3`' });
+        }
+
+        const seen = new Set<string>();
+        return models.filter(m => (seen.has(m.id) ? false : (seen.add(m.id), true)));
     }
 }

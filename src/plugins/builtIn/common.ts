@@ -18,18 +18,50 @@ export function workspaceRoot(): string {
     return folders[0].uri.fsPath;
 }
 
-/** Resolve a path against the workspace root and refuse anything outside it. */
+/**
+ * Resolve a path against the workspace root and refuse anything outside it.
+ *
+ * Lexical containment is not enough on its own: a symbolic link inside the workspace can point
+ * anywhere, so `.continued/link-to-ssh/id_rsa` resolves cleanly while reading `~/.ssh`. The real
+ * path is therefore checked too, walking up to the nearest existing ancestor so that creating a
+ * new file still works.
+ */
 export function resolveInside(relativePath: string): string {
     if (typeof relativePath !== 'string' || !relativePath.trim()) {
         throw new Error('A workspace-relative path is required');
     }
     const root = workspaceRoot();
     const absolute = path.resolve(root, relativePath);
-    const relative = path.relative(root, absolute);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    const contained = (child: string, parent: string) => {
+        const rel = path.relative(parent, child);
+        return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+    };
+    if (!contained(absolute, root)) {
         throw new Error(`Access denied: "${relativePath}" is outside the workspace`);
     }
+
+    const realRoot = realPathOrSelf(root);
+    // The target may not exist yet (a write), so resolve the deepest ancestor that does.
+    let probe = absolute;
+    while (!fs.existsSync(probe)) {
+        const parent = path.dirname(probe);
+        if (parent === probe) { break; }
+        probe = parent;
+    }
+    const realProbe = realPathOrSelf(probe);
+    const realTarget = path.resolve(realProbe, path.relative(probe, absolute));
+    if (!contained(realTarget, realRoot)) {
+        throw new Error(`Access denied: "${relativePath}" resolves outside the workspace through a symbolic link`);
+    }
     return absolute;
+}
+
+function realPathOrSelf(target: string): string {
+    try {
+        return fs.realpathSync(target);
+    } catch {
+        return target;
+    }
 }
 
 export function toRelative(absolute: string): string {

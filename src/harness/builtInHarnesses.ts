@@ -2,7 +2,8 @@
  * Built-in harnesses. They ship with the extension and double as examples for users.
  */
 
-import { HarnessDefinition } from './types';
+import { HarnessDefinition } from '../../core/harness/types';
+import { BLABLADOR_MODELS_HARNESS } from '../../core/harness/modelBench';
 
 export const builtInHarnesses: HarnessDefinition[] = [
     {
@@ -64,6 +65,7 @@ export const builtInHarnesses: HarnessDefinition[] = [
             }
         ]
     },
+    BLABLADOR_MODELS_HARNESS,
     {
         id: 'review-todos-harness',
         name: 'Review TODOs and FIXMEs',

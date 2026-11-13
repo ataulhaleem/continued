@@ -21,7 +21,7 @@ Welcome to Continued's extensible plugin architecture! This guide helps you get 
 
 ### For Developers
 
-Create `.continued/plugins/myTool.ts`:
+Create `.continued/plugins/myTool.js`:
 
 ```typescript
 import { ITool } from '../../src/plugins/types';
@@ -63,7 +63,7 @@ That's it! Your plugin auto-loads and appears in the Plugin Manager.
 ## Real-World Example: Custom Linter
 
 ```typescript
-// .continued/plugins/customLinter.ts
+// .continued/plugins/customLinter.js
 import { ITool } from '../../src/plugins/types';
 import * as vscode from 'vscode';
 
@@ -113,7 +113,7 @@ Users enable it → checkbox toggles on → Agent can invoke `custom_lint` tool!
 ```
 .continued/
 ├── plugins/                    # Your custom plugins go here
-│   ├── exampleUserPlugin.ts   # Example template (included)
+│   ├── example-plugin.js   # Example template (included)
 │   ├── myLinter.ts            # Your custom linter
 │   └── myAnalyzer.ts          # Your custom analyzer
 │
@@ -193,7 +193,7 @@ export const teamPolicies: IResource = {
 ## Next Steps
 
 1. **Read Full Guide**: [PLUGIN_ARCHITECTURE.md](PLUGIN_ARCHITECTURE.md)
-2. **Browse Examples**: [.continued/plugins/exampleUserPlugin.ts](.continued/plugins/exampleUserPlugin.ts)
+2. **Browse Examples**: [.continued/plugins/example-plugin.js](.continued/plugins/example-plugin.js)
 3. **Explore Built-ins**: [src/plugins/builtIn/](src/plugins/builtIn/)
 4. **Create Your First**: Copy example, modify, enable via checkbox!
 

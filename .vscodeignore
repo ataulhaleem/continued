@@ -1,6 +1,10 @@
 .vscode/**
 .vscode-test/**
 src/**
+core/**
+cli/**
+documentation/**
+publication/**
 .gitignore
 .eslintrc.json
 .eslintignore
@@ -10,6 +14,7 @@ bundle.sh
 tsconfig.json
 *.vsix
 versions/**
+artifacts/**
 node_modules/**
 out/**
 test_file/**

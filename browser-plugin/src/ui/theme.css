@@ -92,6 +92,12 @@
     --vscode-badge-background: #e4e8f0;
     --vscode-badge-foreground: #1f2430;
     --vscode-list-hoverBackground: #eef1f7;
+    --vscode-list-activeSelectionBackground: #dfe6f5;
+    --vscode-list-activeSelectionForeground: #1f2430;
+    --vscode-input-placeholderForeground: #8a93a6;
+    --vscode-inputValidation-errorBackground: #fdecec;
+    --vscode-notifications-background: #f3f5f9;
+    --vscode-notifications-border: #d9dee8;
     --vscode-toolbar-hoverBackground: #e4e8f0;
     --vscode-keybindingTable-rowsBackground: #f3f5f9;
     --vscode-textBlockQuote-background: #f3f5f9;

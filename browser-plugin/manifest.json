@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "minimum_chrome_version": "116",
-  "name": "Continued",
-  "version": "0.1.0",
+  "name": "Enclave",
+  "version": "0.3.1",
   "description": "A local-first AI agent in your browser sidebar: reads and works with your tabs, runs on Ollama or cloud models, and builds visual workflows.",
   "homepage_url": "https://github.com/ataulhaleem/continued",
   "icons": {
@@ -29,7 +29,7 @@
     ]
   },
   "action": {
-    "default_title": "Open Continued",
+    "default_title": "Open Enclave",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png"
@@ -40,7 +40,7 @@
   },
   "sidebar_action": {
     "default_panel": "sidepanel.html",
-    "default_title": "Continued",
+    "default_title": "Enclave",
     "open_at_install": true,
     "default_icon": "icons/icon32.png"
   },

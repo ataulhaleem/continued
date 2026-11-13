@@ -7,8 +7,16 @@ import * as vscode from 'vscode';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { ITool } from '../types';
+import { AgentGuardrails } from '../../agentGuardrails';
 
 const execAsync = promisify(exec);
+
+/**
+ * The same guardrails the agent loop uses. The tool enforces them itself so that every
+ * caller — the agent loop, a harness step, a `/tool run-command …` chat command — gets the
+ * identical verdict, instead of the tool keeping a weaker blacklist of its own.
+ */
+const guardrails = new AgentGuardrails();
 
 /**
  * Get the workspace root directory
@@ -19,23 +27,6 @@ function getWorkspaceRoot(): string {
         throw new Error('No workspace folder is open');
     }
     return folders[0].uri.fsPath;
-}
-
-/**
- * Check if a command is safe to execute
- */
-function isCommandSafe(command: string): boolean {
-    const forbiddenCommands = [
-        'rm -rf',
-        'sudo',
-        'mkfs',
-        'dd',
-        'shred',
-        ':(){:|:&};:' // Forkbomb
-    ];
-    
-    const cmd = command.toLowerCase();
-    return !forbiddenCommands.some(forbidden => cmd.includes(forbidden));
 }
 
 /**
@@ -58,32 +49,33 @@ export const runCommandTool: ITool = {
         }
         
         const command = args.command.trim();
-        
-        if (!isCommandSafe(command)) {
-            throw new Error(`Command blocked for safety reasons: "${command}"`);
+
+        const verdict = guardrails.isSafeCommand(command);
+        if (!verdict.safe) {
+            throw new Error(verdict.reason ?? `Command blocked for safety reasons: "${command}"`);
         }
-        
+
         try {
             const workspaceRoot = getWorkspaceRoot();
             const timeout = args.timeout ? parseInt(args.timeout) : 30000; // 30s default
-            
+
             const { stdout, stderr } = await execAsync(command, {
                 cwd: workspaceRoot,
                 timeout: timeout,
                 maxBuffer: 1024 * 1024 // 1MB output limit
             });
-            
+
             if (stderr) {
-                return `Command executed with output:\n${stdout}\n\nStderr:\n${stderr}`;
+                return guardrails.sanitizeCommandOutput(`Command executed with output:\n${stdout}\n\nStderr:\n${stderr}`);
             }
-            
-            return `Command executed successfully:\n${stdout}`;
+
+            return guardrails.sanitizeCommandOutput(`Command executed successfully:\n${stdout}`);
         } catch (error) {
             const err = error as any;
             if (err.killed) {
                 throw new Error(`Command timed out (max ${args.timeout || 30000}ms)`);
             }
-            throw new Error(`Command execution failed: ${err.message}\n${err.stdout || ''}\n${err.stderr || ''}`);
+            throw new Error(guardrails.sanitizeCommandOutput(`Command execution failed: ${err.message}\n${err.stdout || ''}\n${err.stderr || ''}`));
         }
     }
 };

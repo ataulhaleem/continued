@@ -8,7 +8,19 @@
 
 **Install:** [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=AtaUlHaleem.continued) · [Open VSX](https://open-vsx.org/extension/AtaUlHaleem/continued) (VSCodium, Cursor, code-server, Gitpod, Theia) · `code --install-extension AtaUlHaleem.continued`
 
-**Continued** is an elite AI coding assistant built directly into your VS Code sidebar. It orchestrates a seamless multi-model experience by combining local offline LLMs with advanced cloud providers to assist you with conversational chat, file creation, and precise repository modifications.
+**Documentation:** https://ataulhaleem.github.io/continued/ · source in [documentation/](documentation/)
+
+| Surface | Get it |
+| --- | --- |
+| **VS Code** (also VSCodium, Cursor, code-server, Gitpod, Theia) | [Marketplace](https://marketplace.visualstudio.com/items?itemName=AtaUlHaleem.continued) · [Open VSX](https://open-vsx.org/extension/AtaUlHaleem/continued) · `code --install-extension AtaUlHaleem.continued` |
+| **Firefox** sidebar | [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/continued/) — Firefox 140+, desktop |
+| **Chrome / Edge** side panel | release zip in [artifacts](artifacts/) → load unpacked; store listing pending |
+| **Terminal** | `enclave-cli` tarball in a release → `npm install -g ./enclave-cli-<version>.tgz` · [cli/](cli/) |
+| **Other coding agents** | export any harness as a Markdown playbook for Codex, OpenCode, Hermes or Continue.dev, or as CWL for `cwltool` |
+
+One shared core ([core/](core/)) — harness engine, document format, exporters, UI — with three hosts: [src/](src/) (VS Code), [browser-plugin/](browser-plugin/), [cli/](cli/).
+
+**Continued** is a local-first AI coding agent for VS Code. It runs against a model on your own machine through Ollama, or against an institutional endpoint such as [Blablador](https://sdlaml.pages.jsc.fz-juelich.de/ai/guides/blablador_api_access/) at Jülich Supercomputing Centre, so that code and data stay where your institution's rules say they should. Every file edit and command is approval-gated, and repeatable multi-step work is written down as a **workflow-harness**: a JSON document you can run here, export as a playbook for other coding agents, or export to Common Workflow Language and run with `cwltool`, including inside a sealed Podman container.
 
 ---
 
@@ -19,6 +31,7 @@
   * **💬 Chat** — streaming conversation, no tools.
   * **🤖 Agent** — an autonomous loop that reads, searches, writes, deletes and runs commands. Read-only steps run automatically; every write, delete, command and plugin call asks for your approval first.
   * **⚡ Agent Auto-Edit** — the same loop, but changes are applied immediately and collected in an **Agent Changes** panel where each file can be kept or reverted. Risky shell commands (`rm -r`, `git push`, `git reset --hard`, redirects, …) still ask.
+  * **While a run is going** you can keep typing: a message sent mid-run reaches the agent as a note at its next step (the Send button reads *Send note to agent*), and switching the mode dropdown applies from the next action on. Switching to Auto-Edit answers a prompt already on screen for you, unless Auto-Edit would have asked too. A run pauses at the step limit or the time budget (both configurable, `0` = off), after four failed or blocked actions in a row, or when the model repeats itself; sending another message continues it.
   * **📋 Plan** — the model writes a numbered plan first; one click hands the plan to the agent for execution.
 * **Extensible plugin platform:** Enabled tools, resources and skills from `.continued/plugins/` are offered to the agent as actions (`use-tool`, `use-resource`, `use-skill`) and can be invoked in chat with `/tool`, `/resource` and `/skill`.
 * **Guardrails:** Destructive commands (`sudo`, `rm -rf /`, `mkfs`, `curl | sh`, …) and sensitive paths are blocked before execution, paths are confined to the workspace, secrets are masked in command output, and every run has an iteration cap.
@@ -72,17 +85,24 @@ The **Builder** is a flow canvas: Start → nodes → End. Click any **+** on a 
 
 **Variables**: `{{input}}`, `{{item}}`, `{{index}}`, `{{activeFile}}`, `{{selection}}`, `{{workspace}}`, `{{steps.<id>.output}}`, `{{steps.<id>.status}}`, `{{steps.<id>.error}}`, `{{steps.<id>.lines}}`, `{{steps.<id>.json.<key>}}`.
 
-Harnesses are saved as JSON in `.continued/harnesses/` and registered as skills, so the agent can call them (`{"action":"use-skill","skill":"<id>","input":"..."}`) and you can run one from chat with `/harness <id> <input>`. Five built-in harnesses ship as examples; duplicate one to start from it. **Workspace health check** is the one to look at first: four lanes run in parallel (a multi-step git lane with its own LLM step, a TODO/FIXME grep, a test-file search and the file inventory), each with its own error policy, and a final LLM step turns them into a report that states plainly which checks failed. The Run tab shows each step live and lets you stop the run.
+Harnesses are saved as JSON in `.continued/harnesses/` and registered as skills, so the agent can call them (`{"action":"use-skill","skill":"<id>","input":"..."}`) and you can run one from chat with `/harness <id> <input>`. Six built-in harnesses ship as examples; duplicate one to start from it. **Blablador: which model should I use?** lists the models your token can reach, probes all of them in parallel with the same micro-tasks (and your own task, if you give one) and writes a comparison with a recommendation per use and links to the Blablador documentation. **Workspace health check** is the one to look at first: four lanes run in parallel (a multi-step git lane with its own LLM step, a TODO/FIXME grep, a test-file search and the file inventory), each with its own error policy, and a final LLM step turns them into a report that states plainly which checks failed. The Run tab shows each step live and lets you stop the run.
 
 ---
+
+## Command line
+
+The same engine runs from a terminal through `enclave-cli` (folder `cli/`): `enclave run` executes a built-in or `.continued/harnesses/` harness against the current directory with terminal approval prompts, `enclave repro` runs it *N* times per model and reports structural stability, per-step output stability and approval determinism, and `enclave validate` / `export` / `models` / `probe` cover the document format, the three export formats, the reachable models and the model probe. See [cli/README.md](cli/README.md).
 
 ## Settings
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `continued.ollama.baseUrl` | `http://localhost:11434` | Ollama server for local models and inline completion |
-| `continued.agent.maxIterations` | `20` | Steps per agent run before it pauses |
-| `continued.agent.modelTimeoutMs` | `120000` | Timeout for one model call in agent mode |
+| `continued.agent.maxIterations` | `500` | Steps per agent run before it pauses; `0` = no limit |
+| `continued.agent.maxRunMinutes` | `240` | Working time per agent run before it pauses; approval waits excluded; `0` = no limit |
+| `continued.agent.maxConsecutiveFailures` | `4` | Failed, blocked or declined actions in a row before the run stops |
+| `continued.agent.modelTimeoutMs` | `600000` | Hard cap for one model call in agent mode (retried once on timeout) |
+| `continued.agent.modelStallTimeoutMs` | `90000` | Silence from the model before a call counts as stalled |
 | `continued.agent.commandTimeoutMs` | `60000` | Timeout for shell commands run by the agent |
 | `continued.agent.maxContextChars` | `80000` | History budget sent to the model (lower it for small local models) |
 | `continued.agent.maxHistoryMessages` | `40` | Recent messages kept in the prompt |
@@ -161,6 +181,7 @@ Add `readOnly: true` for inspection-only tools (no approval prompts) or `touches
 | tool | `csv-preview`, `json-query` | Columns, row count and numeric stats of a CSV/TSV; dot-path lookup in JSON *(read-only)* |
 | tool | `git-info` | status, diff, log, branches, show *(read-only)* |
 | tool | `python-run`, `http-fetch` | Run a Python snippet/script; GET a public URL as text. **Disabled by default**, enable in Plugin Manager |
+| tool | `model-catalog`, `model-probe` | List the models a provider offers you (Blablador by default); call one model with four mechanically checked micro-tasks and report pass/fail, latency and speed. Only the fixed prompts are sent *(read-only)* |
 | resource | `workspace-files`, `project-info` | File inventory; detected manifests, package manager, scripts, dependencies, languages |
 | resource | `git-summary`, `diagnostics`, `open-editors` | Branch/status/commits; current errors and warnings; open files, cursor and selection |
 | resource | `dev-environment`, `system-info` | Installed toolchains with versions; OS, CPU, memory, Node, VS Code |
@@ -169,16 +190,27 @@ Add `readOnly: true` for inspection-only tools (no approval prompts) or `touches
 
 Read-only tools never prompt for approval. Tools that change files declare which paths they touch, so their changes appear in the Agent Changes panel and can be reverted. User plugins can use the same two flags: `readOnly: true` and `touches(args) { return [path] }`.
 
+## Evidence
+
+Everything the papers report as executed — unit tests, CWL validation and end-to-end `cwltool` runs, the stub's request log, the reproducibility instrument, the adversarial conformance suite — is regenerated by one script and archived with dates and tool versions. The archive accompanies the manuscripts rather than this repository; the instruments themselves are here (`npm run test:unit`, `enclave repro`, `enclave conformance`, `enclave grounding`) and reproduce every number from a checkout.
+
 ## Development
 
 ```bash
 npm install
 npm run compile      # type-check, lint, bundle to dist/
-npm run test:unit    # mocha tests for the action parser and guardrails
-./bundle.sh          # build versions/continued-<version>.vsix (add --install to install it into VS Code)
+npm run test:unit    # mocha tests for the action parser, guardrails and harness engine
+./bundle.sh          # build artifacts/continued-<version>.vsix
+./bundle.sh --install    # …and install it into VS Code
+./bundle.sh --clean      # remove build intermediates without building
 ```
 
-Press F5 in VS Code to launch an Extension Development Host with the sidebar.
+`bundle.sh` produces a production bundle, leaves the VSIX in `artifacts/`, and removes the
+intermediates (`dist/`, `out/`) afterwards — on a failed build too. Pass `--keep-build` to
+keep them for debugging.
+
+Press F5 in VS Code to launch an Extension Development Host with the sidebar. If you have just
+run `./bundle.sh`, the first build regenerates `dist/`.
 
 ---
 
@@ -190,6 +222,10 @@ Press F5 in VS Code to launch an Extension Development Host with the sidebar.
 ---
 
 ## Release Notes
+
+## 1.1.0
+
+One engine, three hosts: the harness engine and agent protocol now live in `core/` and run in VS Code, in the **Enclave** browser extension (Chrome side panel, Firefox sidebar) and from the terminal with `enclave-cli`. Harnesses travel as `.harness.json`, as a Markdown playbook or as Common Workflow Language, and **Run in a container** executes one with `cwltool` inside Podman. New instruments measure what the papers claim: `repro` (structural and per-step stability across runs), a conformance suite under an adversarial stub model, and a grounding check of quotes and numbers against the text a model was given. The agent is built for long runs: streamed model calls with stall detection, one retry on transient errors, a 4-hour time budget with approval waits excluded, 500 steps by default (both `0` = off), a stop after repeated failures, and notes you can send mid-run. Full list in [CHANGELOG.md](CHANGELOG.md).
 
 ## 1.0.1
 
@@ -203,7 +239,7 @@ The release that turns Continued from a chat assistant with file tags into a ful
 - LLM steps are briefed with every earlier step's status, output and error and told never to invent missing data; `Expect: JSON` validates the reply with one corrected retry.
 - Mutating steps follow the mode's approval rules and land in Agent Changes. The Run tab shows each step live with attempts, elapsed time, errors and collapsible output, plus a Stop button; nodes on the canvas light up with their status.
 - Harnesses are JSON in `.continued/harnesses/` and are registered as skills: the agent can call them with `use-skill` (with input), and `/harness <id> <input>` runs one from chat. Runs are recorded in the conversation.
-- Five built-in examples, led by **Workspace health check** (four parallel lanes incl. a multi-step git lane with its own LLM step, then a report that states which checks failed).
+- Six built-in examples, led by **Workspace health check** (four parallel lanes incl. a multi-step git lane with its own LLM step, then a report that states which checks failed).
 
 ### Built-in plugins (20 new)
 - **File tools:** `list-directory`, `file-info`, `edit-file` (find & replace: exact-once, all, or regex), `append-file`, `move-file`, `copy-file`, `make-directory`.
@@ -214,7 +250,7 @@ The release that turns Continued from a chat assistant with file tags into a ful
 - Plugins can declare `args` (rendered as fields in the harness builder and shown to the agent), `readOnly: true` (never prompts for approval) and `touches(args)` (paths the tool changes, snapshotted so the change is revertable).
 
 ### Agent loop
-- Typed action protocol (`src/agentActions.ts`) with a tolerant parser: prose or fences around JSON, `<think>` blocks, raw newlines inside strings, function-call shapes, legacy XML tags. Fixed a bug that stripped code fences out of file contents the model wanted to write.
+- Typed action protocol (`core/agentActions.ts`) with a tolerant parser: prose or fences around JSON, `<think>` blocks, raw newlines inside strings, function-call shapes, legacy XML tags. Fixed a bug that stripped code fences out of file contents the model wanted to write.
 - Provider calls are deduplicated in `src/llmClient.ts` with line-buffered streaming, cancellation, and JSON mode on Ollama, OpenAI, Gemini and Blablador (with automatic fallback when a gateway rejects it).
 - The current task, the workspace file list and a **progress ledger** (read, written, deleted, failed) are in every prompt, so multi-file tasks keep their place.
 - **No blind overwrites:** a write to a file not read in this run is refused and the current content is handed back in the same result.

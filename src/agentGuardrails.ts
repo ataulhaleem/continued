@@ -7,17 +7,32 @@
 import * as path from 'path';
 
 export interface GuardrailOptions {
-    /** Maximum model/tool iterations in one agent run. */
+    /** Maximum model/tool iterations in one agent run; 0 means no step limit. */
     maxIterations?: number;
     /** Maximum retries for a single failing operation. */
     maxRetries?: number;
     /** Shell command timeout in milliseconds. */
     commandTimeoutMs?: number;
+    /** Wall-clock budget for one agent run in milliseconds; 0 means no time limit. */
+    maxRunMs?: number;
+    /** How many actions may fail, be blocked or be declined in a row before the run stops. */
+    maxConsecutiveFailures?: number;
 }
 
 export interface SafetyVerdict {
     safe: boolean;
     reason?: string;
+}
+
+/** A step is one model call plus one tool call, a few seconds each; 500 covers an afternoon of work. */
+export const DEFAULT_MAX_ITERATIONS = 500;
+/** Four hours: long enough for a large refactor or test loop, short enough that a forgotten run does not burn a whole day. */
+export const DEFAULT_MAX_RUN_MS = 4 * 60 * 60000;
+
+function formatMinutes(ms: number): string {
+    const minutes = Math.round(ms / 60000);
+    if (minutes % 60 === 0) { const h = minutes / 60; return `${h}-hour`; }
+    return `${minutes}-minute`;
 }
 
 export class AgentGuardrails {
@@ -93,11 +108,17 @@ export class AgentGuardrails {
     readonly MAX_RETRIES: number;
     readonly MAX_ITERATIONS: number;
     readonly COMMAND_TIMEOUT: number;
+    readonly MAX_RUN_MS: number;
+    readonly MAX_CONSECUTIVE_FAILURES: number;
 
     constructor(options: GuardrailOptions = {}) {
-        this.MAX_ITERATIONS = Math.max(1, options.maxIterations ?? 20);
+        const iterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+        this.MAX_ITERATIONS = iterations <= 0 ? 0 : Math.max(1, iterations);
         this.MAX_RETRIES = Math.max(1, options.maxRetries ?? 3);
         this.COMMAND_TIMEOUT = Math.max(1000, options.commandTimeoutMs ?? 60000);
+        const runMs = options.maxRunMs ?? DEFAULT_MAX_RUN_MS;
+        this.MAX_RUN_MS = runMs <= 0 ? 0 : Math.max(60000, runMs);
+        this.MAX_CONSECUTIVE_FAILURES = Math.max(1, options.maxConsecutiveFailures ?? 4);
     }
 
     /** Split a shell line into the individual commands of a pipeline / list. */
@@ -135,18 +156,25 @@ export class AgentGuardrails {
         return { safe: true };
     }
 
+    /** The one list no mode, approval or carve-out crosses: credential and system locations. */
+    isForbiddenPath(filePath: string): SafetyVerdict {
+        const lower = String(filePath ?? '').replace(/\\/g, '/').toLowerCase();
+        for (const forbidden of this.FORBIDDEN_PATHS) {
+            if (lower.includes(forbidden.toLowerCase()) || lower.startsWith(forbidden.replace(/^\//, '').toLowerCase())) {
+                return { safe: false, reason: `Access to this path is restricted: ${forbidden}` };
+            }
+        }
+        return { safe: true };
+    }
+
     /** Validate whether a file path may be accessed. Paths are resolved relative to the workspace root. */
     isSafeFilePath(filePath: string, workspaceRoot: string): SafetyVerdict {
         const raw = String(filePath ?? '').trim();
         if (!raw) { return { safe: false, reason: 'Empty file path.' }; }
 
         const normalized = raw.replace(/\\/g, '/');
-        const lower = normalized.toLowerCase();
-        for (const forbidden of this.FORBIDDEN_PATHS) {
-            if (lower.includes(forbidden.toLowerCase()) || lower.startsWith(forbidden.replace(/^\//, '').toLowerCase())) {
-                return { safe: false, reason: `Access to this path is restricted: ${forbidden}` };
-            }
-        }
+        const forbidden = this.isForbiddenPath(normalized);
+        if (!forbidden.safe) { return forbidden; }
 
         const root = path.resolve(workspaceRoot || '.');
         const absolute = path.resolve(root, normalized);
@@ -173,12 +201,32 @@ export class AgentGuardrails {
         return this.getCommandRiskLevel(command) === 'high';
     }
 
-    /** Guard against runaway loops. */
-    canExecuteOperation(operationCount: number): { allowed: boolean; reason?: string } {
-        if (operationCount > this.MAX_ITERATIONS) {
+    /**
+     * Guard against runaway loops: a step budget for the model (so a confused model cannot loop
+     * for ever) and a wall-clock budget for the run (so slow calls cannot keep it alive for hours).
+     */
+    canExecuteOperation(operationCount: number, elapsedMs = 0): { allowed: boolean; reason?: string } {
+        if (this.MAX_ITERATIONS > 0 && operationCount > this.MAX_ITERATIONS) {
             return {
                 allowed: false,
                 reason: `Maximum iterations (${this.MAX_ITERATIONS}) reached. The agent stopped to avoid runaway execution.`
+            };
+        }
+        if (this.MAX_RUN_MS > 0 && elapsedMs > this.MAX_RUN_MS) {
+            return {
+                allowed: false,
+                reason: `This run has used its ${formatMinutes(this.MAX_RUN_MS)} time budget (time spent waiting for your approval is not counted). The agent stopped to avoid running unattended for too long.`
+            };
+        }
+        return { allowed: true };
+    }
+
+    /** Stop a run that keeps hitting blocked, failed or declined actions instead of adapting. */
+    canContinueAfterFailures(consecutiveFailures: number): { allowed: boolean; reason?: string } {
+        if (consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
+            return {
+                allowed: false,
+                reason: `${consecutiveFailures} actions in a row failed, were blocked or were declined. The agent stopped rather than keep trying the same thing.`
             };
         }
         return { allowed: true };

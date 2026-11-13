@@ -76,9 +76,9 @@ function rewriteInnerHtml(js) {
 
 for (const t of targets) {
   scripts.forEach((js, i) => {
-    // Inline onclick attributes are blocked by CSP; the shim installs a delegated handler instead.
-    const cleaned = js.replace(/\s*onclick="window\.copyCodeSnippet\(\\''\+uid\+'\\'\)"/g, '');
-    writeFileSync(join('dist', t, `ui-${i}.js`), rewriteInnerHtml(cleaned));
+    // The shared UI now attaches the copy button with a delegated listener, so there is no
+    // inline handler left to strip here.
+    writeFileSync(join('dist', t, `ui-${i}.js`), rewriteInnerHtml(js));
   });
   writeFileSync(join('dist', t, 'sidepanel.html'), html);
 }

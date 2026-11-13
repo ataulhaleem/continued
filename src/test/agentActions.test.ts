@@ -12,10 +12,11 @@ import {
     formatActionDescription,
     isLegacyUiLabel,
     isReadOnlyAction,
+    canonicalizeAction,
     lenientJsonParse,
     parseAgentAction,
     sanitizeAgentDisplayResponse
-} from '../agentActions';
+} from '../../core/agentActions';
 
 suite('agentActions — JSON parsing', () => {
     test('parses the primary action format', () => {
@@ -162,5 +163,42 @@ suite('agentActions — display and history encoding', () => {
         assert.strictEqual(isLegacyUiLabel('Here is the answer'), false);
         const cleaned = sanitizeAgentDisplayResponse('Hello <run_shell command="ls"/> world\n{"action":"read-file","path":"a"}');
         assert.strictEqual(cleaned, 'Hello  world');
+    });
+});
+
+suite('agentActions — canonicalization', () => {
+    const DEDICATED = ['read-file', 'write-file', 'delete-file', 'semantic-search', 'grep-search', 'run-command'];
+
+    test('a use-tool aimed at a dedicated tool becomes its native action', () => {
+        // Without this the action skips the guardrail and approval checks, which key on the type.
+        assert.deepStrictEqual(
+            canonicalizeAction({ type: 'use-tool', tool: 'run-command', args: { command: 'rm -fr ~' } }, DEDICATED),
+            { type: 'run-command', command: 'rm -fr ~' }
+        );
+        assert.deepStrictEqual(
+            canonicalizeAction({ type: 'use-tool', tool: 'write-file', args: { filePath: 'a.ts', content: 'x' } }, DEDICATED),
+            { type: 'write-file', path: 'a.ts', content: 'x' }
+        );
+        assert.deepStrictEqual(
+            canonicalizeAction({ type: 'use-tool', tool: 'delete-file', args: { path: 'b.ts' } }, DEDICATED),
+            { type: 'delete-file', path: 'b.ts' }
+        );
+        assert.deepStrictEqual(
+            canonicalizeAction({ type: 'use-tool', tool: 'grep-search', args: { query: 'TODO' } }, DEDICATED),
+            { type: 'grep-search', query: 'TODO', filePattern: '**/*' }
+        );
+    });
+
+    test('the same rewrite happens for text the model actually emits', () => {
+        const parsed = parseAgentAction('{"action":"use-tool","tool":"run-command","args":{"command":"sudo rm -rf /"}}');
+        assert.deepStrictEqual(parsed, { type: 'use-tool', tool: 'run-command', args: { command: 'sudo rm -rf /' } });
+        assert.deepStrictEqual(canonicalizeAction(parsed!, DEDICATED), { type: 'run-command', command: 'sudo rm -rf /' });
+    });
+
+    test('plugin tools and non-use-tool actions are left alone', () => {
+        const plugin = { type: 'use-tool' as const, tool: 'csv-preview', args: { filePath: 'a.csv' } };
+        assert.deepStrictEqual(canonicalizeAction(plugin, DEDICATED), plugin);
+        const read = { type: 'read-file' as const, path: 'a.ts' };
+        assert.deepStrictEqual(canonicalizeAction(read, DEDICATED), read);
     });
 });

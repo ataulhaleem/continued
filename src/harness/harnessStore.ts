@@ -3,8 +3,8 @@
  */
 
 import * as vscode from 'vscode';
-import { HarnessDefinition } from './types';
-import { validateHarness } from './harnessEngine';
+import { HarnessDefinition } from '../../core/harness/types';
+import { validateHarness } from '../../core/harness/harnessEngine';
 
 export const HARNESS_DIR = ['.continued', 'harnesses'];
 

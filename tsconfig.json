@@ -1,4 +1,14 @@
 {
+	"include": [
+		"src",
+		"core"
+	],
+	"exclude": [
+		"node_modules",
+		"out",
+		"dist",
+		"browser-plugin"
+	],
 	"compilerOptions": {
 		"module": "Node16",
 		"target": "ES2022",
@@ -7,7 +17,7 @@
 			"dom"
 		],
 		"sourceMap": true,
-		"rootDir": "src",
+		"rootDir": ".",
 		"strict": true,   /* enable all strict type-checking options */
 		/* Additional Checks */
 		// "noImplicitReturns": true, /* Report error when not all code paths in function return a value. */

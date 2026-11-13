@@ -3,6 +3,6 @@
  * `build.mjs` bundles this file, imports it, and reads the global it sets.
  */
 
-import { generateChatViewHTML } from './chatView';
+import { generateChatViewHTML } from '../../../core/ui/chatView';
 
 (globalThis as unknown as { __CONTINUED_HTML__: string }).__CONTINUED_HTML__ = generateChatViewHTML();

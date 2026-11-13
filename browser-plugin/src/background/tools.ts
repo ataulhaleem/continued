@@ -8,7 +8,9 @@
  */
 
 import { ext, getSettings } from './storage';
-import { PluginArgSpec } from '../core/harness/types';
+import { fileAccessHelp, hasFileAccess, isFirefox } from './fileAccess';
+import { extractPdfText, isPdfBytes, isPdfUrl, PDF_MAX_BYTES } from './pdf';
+import { PluginArgSpec } from '../../../core/harness/types';
 
 export interface BrowserTool {
     id: string;
@@ -17,6 +19,12 @@ export interface BrowserTool {
     args: PluginArgSpec[];
     /** Never prompts for approval. */
     readOnly?: boolean;
+    /**
+     * The tool sends data off the machine. `readOnly` means "does not change the page", which is
+     * not the same as "safe to run unattended": a tool that can GET an arbitrary URL can carry
+     * whatever the agent has read out with it. Egress tools always ask, whatever the mode.
+     */
+    egress?: boolean;
     /** Prompts even in Auto-Edit mode. */
     risky?: boolean;
     enabled: boolean;
@@ -74,21 +82,192 @@ async function resolveTab(args: Record<string, unknown>): Promise<chrome.tabs.Ta
     return activeTab();
 }
 
-function restricted(tab: chrome.tabs.Tab): string | null {
+/**
+ * Why a tab may not be read, or null when it may. Browser-internal pages are always off limits.
+ * A `file://` tab is readable only when the user enabled it in the options page and the
+ * browser has granted file access; the agent still cannot open file URLs itself (checkUrl).
+ */
+async function restricted(tab: chrome.tabs.Tab): Promise<string | null> {
     const url = tab.url ?? '';
-    if (!url || /^(chrome|about|moz-extension|chrome-extension|edge|file|view-source):/i.test(url)) {
-        return `Cannot read ${url || 'this tab'}: browser-internal and file pages are off limits. Open a normal web page.`;
+    if (/^file:/i.test(url)) {
+        const settings = await getSettings();
+        const granted = settings.allowLocalFiles ? await hasFileAccess() : false;
+        auditLog(`local file ${settings.allowLocalFiles && granted ? 'ALLOWED' : 'DENIED'}: ${url} (setting ${settings.allowLocalFiles ? 'on' : 'off'}, browser grant ${granted ? 'yes' : settings.allowLocalFiles ? 'no' : 'not checked'})`);
+        if (!settings.allowLocalFiles) {
+            return `Cannot read ${url}: local files are off limits until "Read local files opened in the browser" is switched on in Enclave's options.`;
+        }
+        if (!granted) {
+            return `Cannot read ${url}: the browser has not granted Enclave access to local files. ${fileAccessHelp()}`;
+        }
+        return null;
+    }
+    if (!url || /^(chrome|about|moz-extension|chrome-extension|edge|view-source):/i.test(url)) {
+        return `Cannot read ${url || 'this tab'}: browser-internal pages are off limits. Open a normal web page.`;
     }
     return null;
 }
 
-async function runInTab<T, A extends unknown[]>(tab: chrome.tabs.Tab, func: (...args: A) => T, args: A): Promise<T> {
-    const blocked = restricted(tab);
+async function runInTab<T, A extends unknown[]>(tab: chrome.tabs.Tab, func: (...args: A) => T, args: A, world: 'ISOLATED' | 'MAIN' = 'ISOLATED'): Promise<T> {
+    const blocked = await restricted(tab);
     if (blocked) { throw new Error(blocked); }
-    const results = await ext.scripting.executeScript({ target: { tabId: tab.id! }, func, args } as chrome.scripting.ScriptInjection<A, T>);
+    const results = await ext.scripting.executeScript({ target: { tabId: tab.id! }, func, args, world } as chrome.scripting.ScriptInjection<A, T>);
     const first = results?.[0];
     if (!first) { throw new Error('The page did not respond (it may be still loading).'); }
     return first.result as T;
+}
+
+// ---------------------------------------------------------------------------
+// PDF tabs
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the first kilobyte of the URL the tab shows and say whether it is a PDF. Uses the tab's
+ * own cookies (same origin, `credentials: include`) and cancels the body after the first chunk,
+ * so a large HTML page is not downloaded just to be sniffed.
+ */
+async function sniffPdf(url: string): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+        const res = await fetch(url, { signal: controller.signal, credentials: 'include', redirect: 'follow', headers: { Range: 'bytes=0-1023' } });
+        if (!res.ok && res.status !== 206) { return false; }
+        if (/application\/pdf/i.test(res.headers.get('content-type') ?? '')) { await res.body?.cancel(); return true; }
+        const reader = res.body?.getReader();
+        if (!reader) { return false; }
+        const { value } = await reader.read();
+        await reader.cancel();
+        return !!value && isPdfBytes(value);
+    } catch {
+        return false;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function fetchPdfBytes(url: string): Promise<ArrayBuffer> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120000);
+    try {
+        const res = await fetch(url, { signal: controller.signal, credentials: 'include', redirect: 'follow' });
+        if (!res.ok) { throw new Error(`HTTP ${res.status} ${res.statusText} while fetching the PDF`); }
+        const declared = Number(res.headers.get('content-length') ?? 0);
+        if (declared > PDF_MAX_BYTES) { throw new Error(`The PDF is ${(declared / 1048576).toFixed(0)} MB; the limit is ${PDF_MAX_BYTES / 1048576} MB.`); }
+        const data = await res.arrayBuffer();
+        if (data.byteLength > PDF_MAX_BYTES) { throw new Error(`The PDF is larger than ${PDF_MAX_BYTES / 1048576} MB.`); }
+        if (!isPdfBytes(new Uint8Array(data, 0, Math.min(1024, data.byteLength)))) { throw new Error('The response is not a PDF (no %PDF header). If the page needs a login, sign in on the tab first.'); }
+        return data;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/**
+ * Runs inside a tab: fetch the document's own URL and return its bytes as base64. The page's
+ * origin is the file itself, so this can succeed where an extension-page fetch is refused.
+ * Everything it needs is in scope here, because it is serialised and sent into the tab.
+ */
+async function readOwnDocumentAsBase64(): Promise<string> {
+    const res = await fetch(location.href);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) { binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); }
+    return btoa(binary);
+}
+
+/**
+ * Runs in the page's main world of Firefox's PDF viewer: pdf.js exposes the open document as
+ * `PDFViewerApplication`, whose `getData()` yields the file's bytes. Chrome's viewer has no such
+ * object, so there this simply reports that it is not pdf.js.
+ */
+async function readViewerDocumentAsBase64(): Promise<string> {
+    const app = (globalThis as unknown as { PDFViewerApplication?: { initializedPromise?: Promise<void>; pdfDocument?: { getData(): Promise<Uint8Array> } } }).PDFViewerApplication;
+    if (!app) { throw new Error('this tab is not the pdf.js viewer'); }
+    await app.initializedPromise;
+    for (let waited = 0; !app.pdfDocument && waited < 10000; waited += 250) { await new Promise(r => setTimeout(r, 250)); }
+    if (!app.pdfDocument) { throw new Error('the viewer has no document loaded'); }
+    const bytes = await app.pdfDocument.getData();
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) { binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); }
+    return btoa(binary);
+}
+
+/** Text of the PDF a tab shows, with the same header shape `read-page` produces. */
+async function readPdfTab(tab: chrome.tabs.Tab, maxChars: number, pages: string): Promise<string> {
+    const url = tab.url ?? '';
+    const blocked = await restricted(tab);
+    if (blocked) { throw new Error(blocked); }
+    const isLocal = /^file:/i.test(url);
+    const fileName = isLocal ? decodeURIComponent(url.split('/').pop() ?? '') : '';
+    let data: ArrayBuffer;
+    if (isLocal) {
+        // A local PDF sits in the browser's own viewer, so its bytes have to be fetched rather
+        // than read from a DOM. Two routes, tried in turn: the side panel page (an extension
+        // page; works in Chrome once file access is on, refused by Firefox, which blocks every
+        // extension fetch of file://), then a script injected into the PDF tab itself, which
+        // runs with the file's own origin (Firefox 153+ allows the injection once local-file
+        // access is granted). Where both fail, attaching the file in the chat is the way in.
+        // Firefox refuses every route (it blocks file:// fetches from extension pages and shields
+        // its PDF viewer from injected scripts, even with local-file access granted), so say so
+        // at once rather than report three failures.
+        if (isFirefox) {
+            throw new Error(`Firefox does not let any extension read a PDF it displays from your disk. Ask the user to attach "${fileName}" in the chat with the 📎 button; an attached PDF is read page by page. Do not search for the file elsewhere.`);
+        }
+        const attempts: string[] = [];
+        let bytes: ArrayBuffer | null = null;
+        try {
+            if (!localFileReader) { throw new Error('no side panel is open'); }
+            bytes = await localFileReader(url);
+            auditLog(`local PDF ${fileName}: read via the side panel`);
+        } catch (error) {
+            attempts.push(`panel: ${(error as Error).message}`);
+        }
+        if (!bytes) {
+            try {
+                const base64 = await runInTab(tab, readOwnDocumentAsBase64, []);
+                if (!base64) { throw new Error('the tab returned nothing'); }
+                const binary = atob(base64);
+                const out = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) { out[i] = binary.charCodeAt(i); }
+                bytes = out.buffer;
+                auditLog(`local PDF ${fileName}: read from inside the tab`);
+            } catch (error) {
+                attempts.push(`tab: ${(error as Error).message}`);
+            }
+        }
+        if (!bytes) {
+            // Firefox's own viewer (pdf.js) holds the open document in a page-world object; the
+            // bytes come from there without any fetch. Needs the page's main world.
+            try {
+                const base64 = await runInTab(tab, readViewerDocumentAsBase64, [], 'MAIN');
+                if (!base64) { throw new Error('the viewer returned nothing'); }
+                const binary = atob(base64);
+                const out = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) { out[i] = binary.charCodeAt(i); }
+                bytes = out.buffer;
+                auditLog(`local PDF ${fileName}: read from the browser's PDF viewer`);
+            } catch (error) {
+                attempts.push(`viewer: ${(error as Error).message}`);
+            }
+        }
+        if (!bytes) {
+            throw new Error(`Could not read the local PDF "${fileName}" (${attempts.join('; ')}). Ask the user to attach "${fileName}" in the chat with the 📎 button instead; an attached PDF is read page by page.`);
+        }
+        if (bytes.byteLength > PDF_MAX_BYTES) { throw new Error(`The local PDF "${fileName}" is larger than ${PDF_MAX_BYTES / 1048576} MB.`); }
+        if (!isPdfBytes(new Uint8Array(bytes, 0, Math.min(1024, bytes.byteLength)))) { throw new Error(`The local file "${fileName}" is not a PDF (no %PDF header).`); }
+        data = bytes;
+    } else {
+        data = await fetchPdfBytes(url);
+    }
+    const pdf = await extractPdfText(data, { maxChars, pages });
+    const title = pdf.title || (tab.title ?? '').replace(/\.pdf$/i, '') || url;
+    const head = `title: ${title}\nurl: ${url}\nformat: PDF, ${pdf.numPages} page(s); read pages ${pdf.pages.length === pdf.numPages ? 'all' : pdf.pages.join(',')}${pages ? ` (asked: ${pages})` : ''}\nchars: ${pdf.text.length}\n\n`;
+    return head + pdf.text + (pdf.truncated ? `\n…[truncated at ${maxChars} chars; ask for specific pages with the pages argument]` : '');
+}
+
+/** Length of the text after the `read-page` header, to tell an empty document from a real one. */
+function bodyLength(pageResult: string): number {
+    const i = pageResult.indexOf('\n\n');
+    return i === -1 ? pageResult.length : pageResult.length - i - 2;
 }
 
 function tabLabel(tab: chrome.tabs.Tab): string {
@@ -206,14 +385,46 @@ const str = (v: unknown, fallback = ''): string => (v === undefined || v === nul
 const num = (v: unknown, fallback: number): number => { const n = Number(v); return Number.isFinite(n) && v !== '' && v !== undefined ? n : fallback; };
 const bool = (v: unknown): boolean => v === true || /^(true|1|yes)$/i.test(String(v ?? ''));
 
+/**
+ * Reads a file:// URL on behalf of the background. A Manifest V3 service worker cannot fetch
+ * file:// at all; an extension page (the side panel) can where the browser has granted file
+ * access, so the host installs a reader that relays the request there.
+ */
+/** Where access decisions are written; the host wires it to its log. */
+let auditLog: (line: string) => void = () => undefined;
+export function setAuditLog(log: (line: string) => void): void { auditLog = log; }
+
+export type LocalFileReader = (url: string) => Promise<ArrayBuffer>;
+let localFileReader: LocalFileReader | null = null;
+export function setLocalFileReader(reader: LocalFileReader | null): void { localFileReader = reader; }
+
 export const tools: BrowserTool[] = [
     {
         id: 'read-page', name: 'Read Page', source: 'built-in', enabled: true, readOnly: true,
-        description: 'Read the visible text of the active tab (or a specific tab / CSS selector). args: { tabId, selector, maxChars (default 12000) }',
-        args: [{ name: 'tabId', description: 'Tab id from list-tabs; empty = active tab' }, { name: 'selector', description: 'CSS selector to read only part of the page' }, { name: 'maxChars', default: '12000' }],
+        description: 'Read the text of the active tab (or a specific tab / CSS selector). A tab showing a PDF is read as text too, page by page. args: { tabId, selector, maxChars (default 12000), pages (PDF only, e.g. "1-5") }',
+        args: [{ name: 'tabId', description: 'Tab id from list-tabs; empty = active tab' }, { name: 'selector', description: 'CSS selector to read only part of the page (HTML only)' }, { name: 'maxChars', default: '12000' }, { name: 'pages', description: 'PDF page range such as 1-5,8; empty = all' }],
         async execute(args) {
             const tab = await resolveTab(args);
-            return runInTab(tab, pageText, [str(args.selector), num(args.maxChars, 12000)]);
+            const maxChars = num(args.maxChars, 12000);
+            if (isPdfUrl(tab.url ?? '')) { return readPdfTab(tab, maxChars, str(args.pages)); }
+            // A PDF viewer tab has no readable DOM: injection fails (Firefox) or yields an empty
+            // body (Chrome). Then, and only then, the URL is sniffed for a PDF (arXiv, DOI links).
+            let html = '';
+            let failure: Error | null = null;
+            try { html = await runInTab(tab, pageText, [str(args.selector), maxChars]); } catch (error) { failure = error as Error; }
+            if (!failure && bodyLength(html) >= 80) { return html; }
+            if (!/^file:/i.test(tab.url ?? '') && !(await restricted(tab)) && await sniffPdf(tab.url ?? '')) { return readPdfTab(tab, maxChars, str(args.pages)); }
+            if (failure) { throw failure; }
+            return html;
+        }
+    },
+    {
+        id: 'read-pdf', name: 'Read PDF', source: 'built-in', enabled: true, readOnly: true,
+        description: 'Read the text of the PDF shown in the active tab (or a specific tab), page by page with [page N] markers, using pdf.js. args: { tabId, pages (e.g. "1-5,8"; empty = all), maxChars (default 60000) }',
+        args: [{ name: 'tabId', description: 'Tab id from list-tabs; empty = active tab' }, { name: 'pages', description: 'Page range such as 1-5,8; empty = all' }, { name: 'maxChars', default: '60000' }],
+        async execute(args) {
+            const tab = await resolveTab(args);
+            return readPdfTab(tab, num(args.maxChars, 60000), str(args.pages));
         }
     },
     {
@@ -252,7 +463,7 @@ export const tools: BrowserTool[] = [
         }
     },
     {
-        id: 'open-tab', name: 'Open Tab', source: 'built-in', enabled: true,
+        id: 'open-tab', name: 'Open Tab', source: 'built-in', enabled: true, egress: true,
         description: 'Open a URL in a new tab and wait for it to load. args: { url*, background (true keeps the current tab focused) }',
         args: [{ name: 'url', required: true }, { name: 'background', default: 'false' }],
         async execute(args) {
@@ -265,7 +476,7 @@ export const tools: BrowserTool[] = [
         }
     },
     {
-        id: 'navigate', name: 'Navigate', source: 'built-in', enabled: true,
+        id: 'navigate', name: 'Navigate', source: 'built-in', enabled: true, egress: true,
         description: 'Navigate the active tab (or tabId) to a URL and wait for it to load. args: { url*, tabId }',
         args: [{ name: 'url', required: true }, { name: 'tabId' }],
         async execute(args) {
@@ -305,7 +516,9 @@ export const tools: BrowserTool[] = [
         async execute(args) { return runInTab(await activeTab(), pageScroll, [str(args.direction, 'down'), num(args.amount, 800)]); }
     },
     {
-        id: 'fetch-url', name: 'Fetch URL', source: 'built-in', enabled: true, readOnly: true,
+        // Marked egress, not readOnly: it does not touch the page, but it is a way for anything
+        // the agent has read to leave the browser, so it is approved like any other such action.
+        id: 'fetch-url', name: 'Fetch URL', source: 'built-in', enabled: true, egress: true,
         description: 'GET a URL without opening a tab and return its text (HTML reduced to text, JSON pretty-printed). args: { url*, maxChars (default 10000) }',
         args: [{ name: 'url', required: true }, { name: 'maxChars', default: '10000' }],
         async execute(args) {

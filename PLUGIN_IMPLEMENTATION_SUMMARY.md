@@ -200,7 +200,7 @@ case 'togglePlugin': {
 
 ## Example: Creating a Code Review Plugin
 
-`.continued/plugins/codeReview.ts`:
+`.continued/plugins/codeReview.js`:
 
 ```typescript
 import { ITool } from '../../src/plugins/types';
@@ -252,7 +252,7 @@ export const codeReviewTool: ITool = {
 ```
 
 **User workflow**:
-1. Drops file in `.continued/plugins/codeReview.ts`
+1. Drops file in `.continued/plugins/codeReview.js`
 2. Opens Plugins tab
 3. Enables "Code Reviewer" checkbox
 4. Agent can now invoke: `run_tool id="code_review" args='{"filePath":"src/app.ts"}'`
@@ -284,7 +284,7 @@ export const codeReviewTool: ITool = {
    - Common patterns
    - Debugging tips
 
-3. **exampleUserPlugin.ts** (2.16 KB)
+3. **example-plugin.js** (2.16 KB)
    - Template for custom tools
    - Example resource
    - Commented best practices
@@ -301,7 +301,7 @@ export const codeReviewTool: ITool = {
 
 ### For Plugin Developers
 1. Read [PLUGIN_QUICK_START.md](PLUGIN_QUICK_START.md)
-2. Copy `.continued/plugins/exampleUserPlugin.ts` 
+2. Copy `.continued/plugins/example-plugin.js` 
 3. Modify and enable
 4. Test with agent
 5. Share on GitHub (tag: `#continued-plugins`)

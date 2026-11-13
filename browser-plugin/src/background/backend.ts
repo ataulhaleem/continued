@@ -10,11 +10,16 @@ import { LlmClient, ChatMessage } from '../core/llmClient';
 import {
     AgentAction, actionCommandLabel, decodeAction, decodeToolResult, encodeAction, encodeToolResult,
     formatActionDescription, isLegacyUiLabel, parseAgentAction, sanitizeAgentDisplayResponse
-} from '../core/agentActions';
-import { HarnessDefinition, HarnessRun } from '../core/harness/types';
-import { HarnessHost, runHarness, summarizeRun, validateHarness } from '../core/harness/harnessEngine';
+} from '../../../core/agentActions';
+import { HarnessDefinition, HarnessRun } from '../../../core/harness/types';
+import { HarnessHost, runHarness, summarizeRun, validateHarness } from '../../../core/harness/harnessEngine';
+import { collectRequirements, exportFileName, fromPortable, toMarkdown, toPortableJson } from '../../../core/harness/portable';
+import { cwlFileNames, toCwl } from '../../../core/harness/cwl';
 import { builtInBrowserHarnesses } from './harnesses';
-import { tools, resources, activeTab, BrowserTool } from './tools';
+import { tools as pageTools, resources, activeTab, BrowserTool, setLocalFileReader, setAuditLog } from './tools';
+import { extractPdfText, PDF_MAX_BYTES } from './pdf';
+import { FILE_ORIGIN, fileAccessHelp, hasFileAccess } from './fileAccess';
+import { createModelTools } from './modelTools';
 import {
     ChatSession, Settings, ext, getLastSessionId, getPluginOverrides, getSessions, getSettings, getUserHarnesses,
     saveSessions, savePluginOverrides, saveSettings, saveUserHarnesses, setLastSessionId
@@ -23,9 +28,19 @@ import {
 type Post = (message: Record<string, unknown>) => void;
 
 interface DisplayMessage { role: 'user' | 'assistant'; kind: 'text' | 'action' | 'tool'; content: string; command?: string; output?: string }
-interface AttachedFile { name: string; isImage?: boolean; content?: string }
+interface AttachedFile { name: string; isImage?: boolean; isPdf?: boolean; content?: string }
+
+/** Marks a message the user sent while an agent run was going. */
+const STEER_PREFIX = '[USER NOTE during the run]';
 
 const MAX_CORRECTIONS = 2;
+
+/** One step waiting for the user to allow or decline it. */
+interface QueuedApproval {
+    action: AgentAction;
+    /** Resolve the waiting step. Safe to call more than once; only the first call counts. */
+    settle(allow: boolean): void;
+}
 
 function slug(name: string): string {
     const base = name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'my-harness';
@@ -42,9 +57,16 @@ export class Backend {
 
     private agentAbort: AbortController | null = null;
     private harnessAbort: AbortController | null = null;
-    private approvalWaiter: ((allow: boolean) => void) | null = null;
+    /**
+     * Approvals waiting on the user, served one at a time. A parallel harness group can raise
+     * several at once; an earlier single-slot design silently auto-declined whichever request was
+     * already on screen, so those lanes failed with an unexplained DECLINED.
+     */
+    private approvalQueue: QueuedApproval[] = [];
     private iteration = 0;
     private task = '';
+    /** Task line for the run about to start; set by sendPrompt, consumed by startAgent. */
+    private pendingTask = '';
     private lastActionKey = '';
     private lastRun: HarnessRun | null = null;
     private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
@@ -68,6 +90,70 @@ export class Backend {
             async () => (await getSettings()).ollamaBaseUrl,
             log
         );
+        this.modelTools = createModelTools(this.llm);
+        setLocalFileReader(url => this.readLocalFileViaPanel(url));
+        setAuditLog(log);
+    }
+
+    // ------------------------------------------------------------------ local files
+    private readonly localFileRequests = new Map<string, { resolve: (data: ArrayBuffer) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+
+    /** Ask the side panel page to fetch a file:// URL; the service worker cannot. */
+    private readLocalFileViaPanel(url: string): Promise<ArrayBuffer> {
+        return new Promise<ArrayBuffer>((resolve, reject) => {
+            const id = `lf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            const timer = setTimeout(() => { this.localFileRequests.delete(id); reject(new Error('the side panel did not answer within 60s')); }, 60000);
+            this.localFileRequests.set(id, { resolve, reject, timer });
+            this.post({ type: 'readLocalFile', id, url });
+        });
+    }
+
+    private onLocalFileData(data: Record<string, unknown>): void {
+        const pending = this.localFileRequests.get(String(data.id));
+        if (!pending) { return; }
+        clearTimeout(pending.timer);
+        this.localFileRequests.delete(String(data.id));
+        if (data.error || typeof data.base64 !== 'string') { pending.reject(new Error(String(data.error || 'no data'))); return; }
+        const binary = atob(data.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+        pending.resolve(bytes.buffer);
+    }
+
+    /**
+     * A cloud key is configured but its model list failed: say why, in the chat, instead of
+     * showing a lone "llama3 · not pulled yet". The usual cause in Firefox is a missing site
+     * access grant, which a temporarily loaded add-on never gets automatically.
+     */
+    /**
+     * Grants the browser has not given yet, for the side panel's permission bar. The panel is an
+     * extension page, so a click there can request them without a detour to the options page.
+     */
+    private async missingGrants(settings: Settings): Promise<Array<{ id: string; label: string; origins: string[]; hint: string }>> {
+        const items: Array<{ id: string; label: string; origins: string[]; hint: string }> = [];
+        let siteAccess = true;
+        try { siteAccess = await ext.permissions.contains({ origins: ['<all_urls>'] }); } catch { /* assume granted */ }
+        if (!siteAccess) {
+            items.push({ id: 'site', label: 'Grant site access', origins: ['<all_urls>'], hint: 'Needed to reach Ollama and cloud providers and to read pages.' });
+        }
+        if (settings.allowLocalFiles && !(await hasFileAccess())) {
+            items.push({ id: 'file', label: 'Grant local file access', origins: [FILE_ORIGIN], hint: `"Read local files" is on, but the browser has not allowed it. ${fileAccessHelp()}` });
+        }
+        return items;
+    }
+
+    private async modelListNotice(settings: Settings): Promise<string | null> {
+        const problems = this.llm.listProblems;
+        if (!problems.length) { return null; }
+        let siteAccess = true;
+        try { siteAccess = await ext.permissions.contains({ origins: ['<all_urls>'] }); } catch { /* API unavailable: assume granted */ }
+        const lines = [`⚠️ Could not list models from ${problems.map(p => p.split(':')[0]).join(', ')} (${problems.join('; ')}).`];
+        if (!siteAccess) {
+            lines.push('The browser has not granted Enclave site access, so requests to the provider are blocked. Press **Grant site access** in the bar at the top of this panel (or allow "Access your data for all websites" under about:addons → Enclave → Permissions).');
+        } else {
+            lines.push(`Check the key in Enclave's options page${settings.keys.blablador ? ' (a Blablador token expires after a while)' : ''} and the network. The options page's "Show log" button has the details.`);
+        }
+        return lines.join('\n\n');
     }
 
     async init(): Promise<void> {
@@ -76,12 +162,16 @@ export class Backend {
     }
 
     // ------------------------------------------------------------------ plugins
-    private enabledTools(): BrowserTool[] { return tools.filter(t => this.overrides[t.id] ?? t.enabled); }
+    /** Page tools plus the model tools, which need this host's LlmClient. */
+    private modelTools: BrowserTool[] = [];
+    private get tools(): BrowserTool[] { return [...pageTools, ...this.modelTools]; }
+
+    private enabledTools(): BrowserTool[] { return this.tools.filter(t => this.overrides[t.id] ?? t.enabled); }
     private isEnabled(id: string, fallback: boolean): boolean { return this.overrides[id] ?? fallback; }
 
     private pluginsPayload() {
         return {
-            tools: tools.map(t => ({ id: t.id, name: t.name, version: '1.0.0', description: t.description, enabled: this.isEnabled(t.id, t.enabled), source: 'built-in', args: t.args, readOnly: !!t.readOnly })),
+            tools: this.tools.map(t => ({ id: t.id, name: t.name, version: '1.0.0', description: t.description, enabled: this.isEnabled(t.id, t.enabled), source: 'built-in', args: t.args, readOnly: !!t.readOnly && !t.egress, egress: !!t.egress })),
             resources: resources.map(r => ({ id: r.id, name: r.name, version: '1.0.0', description: r.description, enabled: this.isEnabled(r.id, r.enabled), source: 'built-in' })),
             skills: [...this.harnesses.values()].map(h => ({ id: h.id, name: h.name, version: h.version ?? '1.0.0', description: h.description ?? '', enabled: this.isEnabled(h.id, true), source: h.source, harness: true }))
         };
@@ -90,6 +180,12 @@ export class Backend {
     private postPlugins(): void {
         const p = this.pluginsPayload();
         this.post({ type: 'setPlugins', plugins: p, enabledCount: [...p.tools, ...p.resources, ...p.skills].filter(x => x.enabled).length });
+    }
+
+    /** Name and version recorded in exported documents, for provenance. */
+    private generatorId(): string {
+        const version = ext.runtime.getManifest?.().version ?? '0.0.0';
+        return `enclave-browser/${version}`;
     }
 
     // ------------------------------------------------------------------ harness registry
@@ -110,6 +206,8 @@ export class Backend {
     private harnessCatalog() {
         const p = this.pluginsPayload();
         return {
+            // A browser extension cannot drive Podman; the UI hides the option when this is false.
+            capabilities: { container: false },
             harnesses: [...this.harnesses.values()].map(h => ({ id: h.id, name: h.name, description: h.description ?? '', source: h.source, input: h.input ?? null, stepCount: h.steps.length })),
             problems: [],
             plugins: { tools: p.tools.filter(t => t.enabled), resources: p.resources.filter(r => r.enabled), skills: p.skills.filter(s => s.enabled) },
@@ -223,7 +321,7 @@ export class Backend {
 
     private runActions(): Array<{ action: AgentAction; ok: boolean; output: string }> {
         let lastUser = -1;
-        for (let i = this.history.length - 1; i >= 0; i--) { if (this.history[i].role === 'user') { lastUser = i; break; } }
+        for (let i = this.history.length - 1; i >= 0; i--) { if (this.history[i].role === 'user' && !this.history[i].content.startsWith(STEER_PREFIX)) { lastUser = i; break; } }
         const entries = this.history.slice(lastUser + 1);
         const out: Array<{ action: AgentAction; ok: boolean; output: string }> = [];
         for (let i = 0; i < entries.length; i++) {
@@ -250,7 +348,8 @@ export class Backend {
     private async systemPrompt(): Promise<string> {
         const toolLines = this.enabledTools().map(t => {
             const args = t.args.length ? ` args: {${t.args.map(a => `"${a.name}"${a.required ? '*' : ''}`).join(', ')}}` : '';
-            return `  • {"action":"${t.id}"${t.args.length ? ', …' : ''}}${t.readOnly ? ' [read-only]' : ''}${t.risky ? ' [asks for approval]' : ''}: ${t.description}${args}`;
+            const flags = `${t.readOnly && !t.egress ? ' [read-only]' : ''}${t.egress ? ' [sends data off this machine; always asks]' : ''}${t.risky ? ' [asks for approval]' : ''}`;
+            return `  • {"action":"${t.id}"${t.args.length ? ', …' : ''}}${flags}: ${t.description}${args}`;
         }).join('\n');
         const resLines = resources.filter(r => this.isEnabled(r.id, r.enabled)).map(r => `  • ${r.id}: ${r.description}`).join('\n');
         const skillLines = [...this.harnesses.values()].filter(h => this.isEnabled(h.id, true)).map(h => `  • ${h.id}: ${h.description ?? h.name}`).join('\n');
@@ -261,7 +360,7 @@ export class Backend {
             tabInfo = `Active tab: [${tab.id}] ${tab.title ?? ''} — ${tab.url ?? ''}\nOpen tabs in this window: ${all.length}`;
         } catch { /* keep placeholder */ }
 
-        return `You are Continued, an AI browsing agent running in the user's browser side panel.
+        return `You are Enclave, an AI browsing agent running in the user's browser side panel.
 
 ## HOW YOU WORK
 You operate in a loop. Each reply is exactly ONE action as a single JSON object. The action is executed and its result is sent back to you as a [TOOL RESULT]. Repeat until the task is complete, then reply with a final-answer.
@@ -281,6 +380,9 @@ ${skillLines || '  (none)'}
 4. Actions that change the page (click, fill, navigate, open-tab) may ask the user for approval. If a result starts with BLOCKED, FAILED or DECLINED, choose another approach or explain in final-answer.
 5. Never enter passwords, payment details or personal data unless the user explicitly asked for exactly that.
 6. Use final-answer only when the task is done or you are blocked; write the message in Markdown with the sources (URLs) you used.
+7. A file the user attached (marked "[Attached file: …]" or "[Attached PDF: …]" in their message) is already in front of you: answer from that text with final-answer. Do not read-page, read-pdf or run a skill to fetch it again.
+8. A message starting with "[USER NOTE during the run]" was sent by the user while you were working: follow it from now on, even if it changes or narrows the task.
+9. If a file on the user's computer could not be read, ask the user to attach it. Never search for it online, guess its contents, or look for a copy elsewhere.
 
 ## EXAMPLE
 User: What does this page say about pricing?
@@ -299,48 +401,85 @@ ${tabInfo}`;
     }
 
     // ------------------------------------------------------------------ approvals & policy
-    private toolById(id: string): BrowserTool | undefined { return tools.find(t => t.id === id); }
+    private toolById(id: string): BrowserTool | undefined { return this.tools.find(t => t.id === id); }
 
     private isReadOnly(action: AgentAction): boolean {
         if (action.type === 'final-answer' || action.type === 'use-resource') { return true; }
-        if (action.type === 'use-tool') { return !!this.toolById(action.tool)?.readOnly; }
+        if (action.type === 'use-tool') {
+            const tool = this.toolById(action.tool);
+            // An egress tool is never treated as read-only, even if it also declares readOnly.
+            return !!tool?.readOnly && !tool?.egress;
+        }
         return false;
     }
 
     private isRisky(action: AgentAction): boolean {
-        return action.type === 'use-tool' && !!this.toolById(action.tool)?.risky;
+        if (action.type !== 'use-tool') { return false; }
+        const tool = this.toolById(action.tool);
+        return !!tool?.risky || !!tool?.egress;
     }
 
     private awaitApproval(action: AgentAction, signal: AbortSignal): Promise<boolean> {
         return new Promise(resolve => {
             if (signal.aborted) { resolve(false); return; }
-            this.approvalWaiter?.(false);
-            const finish = (allow: boolean) => {
-                if (this.approvalWaiter === finish) { this.approvalWaiter = null; }
-                signal.removeEventListener('abort', onAbort);
-                resolve(allow);
+            let settled = false;
+            const onAbort = () => entry.settle(false);
+            const entry: QueuedApproval = {
+                action,
+                settle: (allow: boolean) => {
+                    if (settled) { return; }
+                    settled = true;
+                    signal.removeEventListener('abort', onAbort);
+                    const wasOnScreen = this.approvalQueue[0] === entry;
+                    const index = this.approvalQueue.indexOf(entry);
+                    if (index !== -1) { this.approvalQueue.splice(index, 1); }
+                    resolve(allow);
+                    if (wasOnScreen) { this.showNextApproval(); }
+                }
             };
-            const onAbort = () => finish(false);
-            this.approvalWaiter = finish;
             signal.addEventListener('abort', onAbort, { once: true });
-            this.post({ type: 'requestCommandApproval', command: actionCommandLabel(action), kind: 'plugin' });
-            this.post({ type: 'agentWorking', step: this.iteration, label: 'waiting for your approval…' });
+            this.approvalQueue.push(entry);
+            if (this.approvalQueue.length === 1) { this.showNextApproval(); }
         });
     }
 
+    /** Put the request at the head of the queue on screen, if there is one. */
+    private showNextApproval(): void {
+        const head = this.approvalQueue[0];
+        if (!head) { return; }
+        const waiting = this.approvalQueue.length - 1;
+        this.post({ type: 'requestCommandApproval', command: actionCommandLabel(head.action), kind: 'plugin' });
+        this.post({
+            type: 'agentWorking',
+            step: this.iteration,
+            label: waiting > 0 ? `waiting for your approval… (${waiting} more queued)` : 'waiting for your approval…'
+        });
+    }
+
+    /** Answer the request currently on screen. */
     resolveApproval(allow: boolean): void {
-        const waiter = this.approvalWaiter;
-        this.approvalWaiter = null;
-        waiter?.(allow);
+        this.approvalQueue[0]?.settle(allow);
+    }
+
+    /** Decline every queued request — the run was cancelled or has finished. */
+    private drainApprovals(): void {
+        while (this.approvalQueue.length > 0) { this.approvalQueue[0].settle(false); }
     }
 
     private async executeWithPolicy(action: AgentAction, mode: string, signal: AbortSignal): Promise<string> {
+        const verdict = await this.policyGate(action, mode, signal);
+        if (verdict) { return verdict; }
+        return this.execute(action, mode, signal);
+    }
+
+    /** Approval by mode, run before a harness step's timeout starts. Null means proceed. */
+    private async policyGate(action: AgentAction, mode: string, signal: AbortSignal): Promise<string | null> {
         const needsApproval = !this.isReadOnly(action) && (mode !== 'agent-auto' || this.isRisky(action));
         if (needsApproval) {
             const allowed = await this.awaitApproval(action, signal);
             if (!allowed) { return 'DECLINED: the user did not approve this action.'; }
         }
-        return this.execute(action, mode, signal);
+        return null;
     }
 
     private async execute(action: AgentAction, mode: string, signal: AbortSignal): Promise<string> {
@@ -377,21 +516,58 @@ ${tabInfo}`;
     }
 
     // ------------------------------------------------------------------ prompts
-    private composePrompt(text: string, files: AttachedFile[]): string {
+    /**
+     * What the agent is asked to do, without the attachment bodies: those live in the user
+     * message, and repeating them in the system prompt would double the context cost.
+     */
+    private taskLine(text: string, files: AttachedFile[]): string {
+        const names = files.slice(0, 10).map(f => f.name);
+        const ask = text.trim();
+        if (!names.length) { return ask; }
+        return `${ask || 'The user attached file(s) without further instructions: use their contents to do what the conversation asked for (or summarise them if nothing was asked).'} [attached: ${names.join(', ')} — contents are in the user message]`;
+    }
+
+    private async composePrompt(text: string, files: AttachedFile[]): Promise<string> {
         if (!files.length) { return text; }
         const parts = [text.trim()];
         for (const f of files.slice(0, 10)) {
             if (f.isImage) { parts.push(`[Attached image "${f.name}" — images are not supported yet]`); continue; }
+            if (f.isPdf) { parts.push(await this.attachedPdf(f)); continue; }
             const content = String(f.content ?? '');
             parts.push(`[Attached file: ${f.name}]\n\`\`\`\n${content.length > 60000 ? `${content.slice(0, 60000)}\n…[truncated]` : content}\n\`\`\``);
         }
         return parts.filter(Boolean).join('\n\n');
     }
 
+    /**
+     * An attached PDF arrives as a data URL; its text is extracted here, page by page, so a
+     * local PDF the browser will not let the extension read from a tab can still be worked on.
+     */
+    private async attachedPdf(f: AttachedFile): Promise<string> {
+        // Leave room in the context budget for the system prompt and the reply.
+        const MAX_CHARS = Math.max(8000, Math.min(60000, (await getSettings()).maxContextChars - 12000));
+        try {
+            const base64 = String(f.content ?? '').replace(/^data:[^,]*,/, '');
+            if (!base64) { throw new Error('the file could not be read'); }
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+            if (bytes.byteLength > PDF_MAX_BYTES) { throw new Error(`the file is larger than ${PDF_MAX_BYTES / 1048576} MB`); }
+            const pdf = await extractPdfText(bytes, { maxChars: MAX_CHARS });
+            const head = `[Attached PDF: ${f.name} — ${pdf.numPages} page(s)${pdf.title ? `, title: ${pdf.title}` : ''}; text with [page N] markers${pdf.truncated ? `, truncated at ${MAX_CHARS} chars` : ''}]`;
+            this.log(`attached PDF ${f.name}: ${pdf.numPages} pages, ${pdf.text.length} chars${pdf.truncated ? ' (truncated)' : ''}`);
+            return `${head}\n\`\`\`\n${pdf.text}\n\`\`\``;
+        } catch (error) {
+            this.log(`attached PDF ${f.name} failed: ${(error as Error).message}`);
+            return `[Attached PDF: ${f.name} — could not be read: ${(error as Error).message}. Its contents are NOT available; tell the user.]`;
+        }
+    }
+
     async sendPrompt(text: string, model: string, mode: string, files: AttachedFile[]): Promise<void> {
         if (!this.sessionId) { this.sessionId = `session_${Date.now()}`; }
-        const prompt = this.composePrompt(text, files);
+        const prompt = await this.composePrompt(text, files);
         this.history.push({ role: 'user', content: prompt });
+        this.pendingTask = this.taskLine(text, files);
 
         const trimmed = prompt.trim();
         if (/^\/plugins$/i.test(trimmed)) {
@@ -431,8 +607,8 @@ ${tabInfo}`;
     private async chatTurn(model: string, mode: string): Promise<void> {
         const settings = await getSettings();
         let system = mode === 'plan'
-            ? 'You are Continued, an AI browsing assistant in PLAN mode. Do NOT act. Write a concise numbered plan another agent can execute with these tools: read-page, find-in-page, fetch-url, extract-links, list-tabs, open-tab, navigate, click, fill. Name the pages/URLs to visit and what to extract. End with a verification step. Plain Markdown, no JSON.'
-            : 'You are Continued, an AI assistant in the browser side panel. Answer directly and concisely in Markdown.';
+            ? 'You are Enclave, an AI browsing assistant in PLAN mode. Do NOT act. Write a concise numbered plan another agent can execute with these tools: read-page, find-in-page, fetch-url, extract-links, list-tabs, open-tab, navigate, click, fill. Name the pages/URLs to visit and what to extract. End with a verification step. Plain Markdown, no JSON.'
+            : 'You are Enclave, an AI assistant in the browser side panel. Answer directly and concisely in Markdown.';
         try {
             const tab = await activeTab();
             system += `\n\nThe user is looking at: ${tab.title ?? ''} — ${tab.url ?? ''}`;
@@ -469,8 +645,9 @@ ${tabInfo}`;
         this.agentAbort = abort;
         this.iteration = 0;
         this.lastActionKey = '';
-        this.task = prompt;
-        this.log(`▶ agent (${mode}, ${model}): ${prompt.slice(0, 200)}`);
+        this.task = this.pendingTask || prompt;
+        this.pendingTask = '';
+        this.log(`▶ agent (${mode}, ${model}): ${this.task.slice(0, 200)}`);
         this.post({ type: 'agentWorking', step: 1, label: mode === 'agent' ? 'starting — page changes will ask for approval…' : 'starting — only clicks and form fills will ask…' });
         await this.persist(mode);
         this.busy(true);
@@ -578,7 +755,8 @@ ${tabInfo}`;
         this.post({ type: 'agentWorking', step: 0, label: `harness "${def.name}" running…` });
 
         const host: HarnessHost = {
-            runTool: (pluginId, args, signal) => this.executeWithPolicy({ type: 'use-tool', tool: pluginId, args }, mode, signal),
+            gateTool: (pluginId, args, signal) => this.policyGate({ type: 'use-tool', tool: pluginId, args }, mode, signal),
+            runTool: (pluginId, args, signal) => this.execute({ type: 'use-tool', tool: pluginId, args }, mode, signal),
             runResource: (pluginId, signal) => this.execute({ type: 'use-resource', resource: pluginId }, mode, signal),
             runSkill: async (pluginId, skillInput) => {
                 const nested = this.harnesses.get(pluginId);
@@ -609,7 +787,7 @@ ${tabInfo}`;
         let run: HarnessRun;
         this.busy(true);
         try {
-            run = await runHarness(def, host, { input, signal: abort.signal, defaultModel: model });
+            run = await runHarness(def, host, { input, signal: abort.signal, defaultModel: model, modelTimeoutMs: Math.max(600000, (await getSettings()).modelTimeoutMs || 0) });
         } catch (error) {
             run = { harnessId: def.id, harnessName: def.name, input, status: 'failed', steps: [], output: '', error: (error as Error).message, startedAt: Date.now(), endedAt: Date.now() };
         } finally {
@@ -637,12 +815,13 @@ ${tabInfo}`;
         const str = (k: string, fallback = '') => (data[k] === undefined || data[k] === null ? fallback : String(data[k]));
         switch (data.type) {
             case 'ping': this.post({ type: 'pong' }); break;
+            case 'localFileData': this.onLocalFileData(data); break;
             case 'openSettings': await ext.runtime.openOptionsPage(); break;
 
             case 'getModels': {
                 const settings = await getSettings();
                 const models = await this.llm.listModels();
-                this.post({ type: 'setModels', models, savedModel: settings.lastModel || models[0], savedMode: settings.lastMode });
+                this.post({ type: 'setModels', models, savedModel: settings.lastModel || models[0]?.id, savedMode: settings.lastMode });
                 await this.postSessions();
                 const lastId = await getLastSessionId();
                 if (lastId) {
@@ -650,6 +829,11 @@ ${tabInfo}`;
                     if (found) { this.sessionId = found.id; this.history = [...found.history]; this.postSessionView(found.mode); }
                 }
                 await this.postActiveTab();
+                // After the session view: restoring a session clears the chat, so anything posted
+                // earlier would be wiped before the user saw it.
+                const notice = await this.modelListNotice(settings);
+                if (notice) { this.post({ type: 'assistantResponse', content: notice }); }
+                this.post({ type: 'permissionBar', items: await this.missingGrants(settings) });
                 break;
             }
             case 'startNewChat': {
@@ -675,9 +859,24 @@ ${tabInfo}`;
             }
             case 'saveModelPreference': if (str('model')) { await saveSettings({ lastModel: str('model') }); } break;
             case 'saveModePreference': if (['chat', 'agent', 'agent-auto', 'plan'].includes(str('mode'))) { await saveSettings({ lastMode: str('mode') }); } break;
+            case 'steerAgent': {
+                const note = str('value').trim();
+                if (!note) { break; }
+                if (!this.agentAbort || this.agentAbort.signal.aborted) {
+                    this.post({ type: 'assistantResponse', content: 'No agent run is in progress, so this note was not delivered. Send it as a normal message.' });
+                    break;
+                }
+                this.history.push({ role: 'user', content: `${STEER_PREFIX} ${note}` });
+                this.log(`user note during run: ${note.slice(0, 200)}`);
+                this.post({ type: 'agentWorking', step: this.iteration, label: 'note received — the agent sees it at its next step…' });
+                break;
+            }
             case 'clearHistory': {
                 this.agentAbort?.abort();
                 this.history = [];
+                this.task = '';
+                this.pendingTask = '';
+                this.lastActionKey = '';
                 if (this.sessionId) { const sessions = await getSessions(); const idx = sessions.findIndex(s => s.id === this.sessionId); if (idx !== -1) { sessions[idx].history = []; await saveSessions(sessions); } }
                 break;
             }
@@ -772,9 +971,61 @@ ${tabInfo}`;
                 this.postPlugins();
                 break;
             }
-            case 'harnessOpenFile': {
+            case 'harnessExport': {
                 const def = this.harnesses.get(str('id'));
-                if (def) { this.post({ type: 'harnessError', message: `JSON for "${def.id}":\n${JSON.stringify(def, null, 2).slice(0, 4000)}` }); }
+                if (!def) { this.post({ type: 'harnessError', message: `Harness "${str('id')}" not found.` }); break; }
+                const generator = this.generatorId();
+                if (str('format') === 'cwl') {
+                    // Two artifacts: the workflow and its job file. Each goes back to the side panel to save.
+                    const settings = await getSettings();
+                    const { workflow, job } = toCwl(def, { generator, defaultModel: settings.lastModel || 'llama3' });
+                    const names = cwlFileNames(def);
+                    this.post({ type: 'harnessDownload', filename: names.workflow, mime: 'application/x-yaml', content: workflow });
+                    this.post({ type: 'harnessDownload', filename: names.job, mime: 'application/x-yaml', content: job });
+                    break;
+                }
+                const markdown = str('format') === 'markdown';
+                // A background worker cannot write files, so the document goes back to the side
+                // panel, which saves it through an object URL.
+                this.post({
+                    type: 'harnessDownload',
+                    filename: exportFileName(def, markdown ? 'md' : 'json'),
+                    mime: markdown ? 'text/markdown' : 'application/json',
+                    content: markdown ? toMarkdown(def, { generator }) : toPortableJson(def, { generator })
+                });
+                break;
+            }
+            case 'harnessImport': {
+                // Only the side panel can show a file picker.
+                this.post({ type: 'harnessRequestFile' });
+                break;
+            }
+            case 'harnessImportData': {
+                const result = fromPortable(str('content'), validateHarness);
+                if (!result.harness) {
+                    this.post({ type: 'harnessError', message: `That file is not a usable harness:\n- ${result.problems.join('\n- ')}` });
+                    break;
+                }
+                const def = result.harness;
+                const requires = collectRequirements(def);
+                const known = this.knownPlugins();
+                const missing = [
+                    ...requires.tools.filter(id => !known.tools.has(id)),
+                    ...requires.resources.filter(id => !known.resources.has(id)),
+                    ...requires.skills.filter(id => !known.skills.has(id))
+                ];
+                const map = await getUserHarnesses();
+                map[def.id] = { ...def, source: 'user' };
+                await saveUserHarnesses(map);
+                await this.loadHarnesses();
+                this.post({ type: 'harnessCatalog', catalog: this.harnessCatalog() });
+                this.postPlugins();
+                const notes = [
+                    `Imported "${def.name}".`,
+                    ...result.warnings,
+                    missing.length ? `It needs ${missing.join(', ')}, which ${missing.length === 1 ? 'is' : 'are'} not available in the browser build.` : ''
+                ].filter(Boolean);
+                this.post({ type: 'harnessError', message: notes.join(' ') });
                 break;
             }
             case 'harnessRun': {

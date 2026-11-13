@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Continued · Options</title>
+  <title>Enclave · Options</title>
   <link rel="stylesheet" href="options.css" />
 </head>
 <body>
   <main class="wrap">
-    <h1><span class="mark">C</span> Continued options</h1>
-    <p class="lead">Continued runs entirely in your browser. Prompts and page content go only to the model you select. Nothing else is collected.</p>
+    <h1><span class="mark">E</span> Enclave options</h1>
+    <p class="lead">Enclave runs entirely in your browser. Prompts and page content go only to the model you select. Nothing else is collected.</p>
 
     <section>
       <h2>Local models (Ollama)</h2>
@@ -20,6 +20,7 @@
     <section>
       <h2>Cloud providers (optional)</h2>
       <p class="hint warn">Keys are stored in extension storage on this device, unencrypted. Prefer Ollama for anything sensitive.</p>
+      <p class="hint" id="siteAccessRow">Enclave needs the browser's site-access grant to reach a provider's API (and Ollama on another machine). <button id="grantSiteAccess" class="secondary" type="button">Grant site access</button> <span id="siteAccessStatus" class="status"></span></p>
       <label>OpenAI API key <input id="key-openai" type="password" autocomplete="off" /></label>
       <label>Google Gemini API key <input id="key-gemini" type="password" autocomplete="off" /></label>
       <label>Anthropic API key <input id="key-anthropic" type="password" autocomplete="off" /></label>
@@ -34,8 +35,11 @@
         <label>Context budget (chars) <input id="maxContextChars" type="number" min="4000" step="1000" /></label>
       </div>
       <label class="check"><input id="allowPrivateNetwork" type="checkbox" /> Allow the agent to open and fetch localhost / private-network URLs</label>
+      <label class="check"><input id="allowLocalFiles" type="checkbox" /> Read local files opened in the browser (file:// tabs)</label>
+      <p class="hint">Off by default. When on, <em>read-page</em> and <em>read-pdf</em> can read an HTML, text or PDF file you opened from your disk, and its text goes to the selected model like any web page. Firefox does not let any extension read a PDF it displays from your disk (it blocks file:// fetches and shields its PDF viewer), so there a local PDF is attach-only: use the 📎 button in the chat, which works in both browsers without this setting. Chrome reads local PDFs once its file-access switch is on. The agent still cannot open file URLs on its own. The browser must also grant file access, which is a separate permission in Firefox 153+ and a switch on the extension's details page in Chrome. <button id="grantFileAccess" class="secondary" type="button">Grant file access</button> <span id="fileAccessStatus" class="status"></span></p>
     </section>
 
+    <p class="hint">Changes take effect as you make them: a field is saved when you leave it or press Enter, a checkbox the moment you tick it. Save stores everything on the page at once and asks the browser for site access if it is still missing.</p>
     <div class="actions">
       <button id="save" type="button">Save</button>
       <button id="showLog" class="secondary" type="button">Show log</button>

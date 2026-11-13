@@ -14,6 +14,7 @@ Continued is an AI assistant. In VS Code it works on the files in your open work
 | --- | --- | --- |
 | Your prompts and the conversation history | The model provider you selected in the dropdown | To generate a reply |
 | Workspace file contents (VS Code) or page text, selection, tab titles and URLs (browser) | The same provider, only for the files/pages the agent reads for your task | Context for the reply |
+| Text of a local file you opened in a browser tab (`file://`), only if you switched on *Read local files opened in the browser* in the options page; off by default | The same provider, only when the agent reads that tab for your task | Context for the reply |
 | Command output (VS Code) or fetched URL content (browser) | The same provider | Tool results the agent reasons about |
 | API key | The provider it belongs to, as an authorization header | Authentication |
 

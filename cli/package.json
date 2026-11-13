@@ -1,0 +1,19 @@
+{
+  "name": "enclave-cli",
+  "version": "0.1.0",
+  "description": "Run, validate, export and reproduce Enclave workflow-harnesses from the terminal.",
+  "license": "MIT",
+  "bin": { "enclave": "dist/enclave.js" },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "node build.mjs",
+    "check-types": "tsc --noEmit",
+    "pack": "npm run build && mkdir -p ../artifacts && npm pack --pack-destination ../artifacts"
+  },
+  "engines": { "node": ">=18" },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3"
+  }
+}

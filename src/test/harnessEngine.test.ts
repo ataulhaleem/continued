@@ -1,6 +1,6 @@
 import * as assert from 'assert';
-import { HarnessHost, LlmStepRequest, runHarness, summarizeRun, validateHarness } from '../harness/harnessEngine';
-import { HarnessDefinition, HarnessRun } from '../harness/types';
+import { HarnessHost, LlmStepRequest, runHarness, summarizeRun, validateHarness } from '../../core/harness/harnessEngine';
+import { HarnessDefinition, HarnessRun } from '../../core/harness/types';
 import { builtInHarnesses } from '../harness/builtInHarnesses';
 
 interface FakeHost extends HarnessHost {
@@ -63,7 +63,7 @@ suite('harnessEngine — validation', () => {
 
     test('every built-in harness is valid against the built-in plugins', () => {
         const known = {
-            tools: new Set(['read-file', 'write-file', 'delete-file', 'semantic-search', 'grep-search', 'run-command', 'open-file']),
+            tools: new Set(['read-file', 'write-file', 'delete-file', 'semantic-search', 'grep-search', 'run-command', 'open-file', 'model-catalog', 'model-probe']),
             resources: new Set(['workspace-files']),
             skills: new Set<string>()
         };
@@ -237,5 +237,105 @@ suite('harnessEngine — execution', () => {
         const text = summarizeRun(result);
         assert.ok(text.includes('failed'));
         assert.ok(text.includes('kaboom'));
+    });
+});
+
+suite('harnessEngine — declined steps', () => {
+    const declineHost = () => makeHost({
+        async runTool(pluginId: string) {
+            host.calls.push(`tool:${pluginId}`);
+            if (pluginId === 'needs-approval') { return 'DECLINED: the user did not approve this step.'; }
+            return `ran ${pluginId}`;
+        }
+    });
+    let host: FakeHost;
+
+    test('a decline is never retried, whatever the retry policy says', async () => {
+        host = declineHost();
+        const def: HarnessDefinition = {
+            id: 'h', name: 'H', source: 'built-in',
+            steps: [{ id: 's1', name: 'Ask', type: 'tool', pluginId: 'needs-approval', args: {}, onError: 'retry-then-continue', retries: 3 }]
+        };
+        const run = await runHarness(def, host, { input: '', signal: new AbortController().signal });
+        assert.strictEqual(host.calls.filter(c => c === 'tool:needs-approval').length, 1, 'the user was asked more than once');
+        assert.strictEqual(run.steps[0].attempts, 1);
+    });
+
+    test('a decline stops the harness even under a continue policy', async () => {
+        host = declineHost();
+        const def: HarnessDefinition = {
+            id: 'h', name: 'H', source: 'built-in',
+            steps: [
+                { id: 's1', name: 'Ask', type: 'tool', pluginId: 'needs-approval', args: {}, onError: 'continue' },
+                { id: 's2', name: 'After', type: 'tool', pluginId: 'echo', args: {} }
+            ]
+        };
+        const run = await runHarness(def, host, { input: '', signal: new AbortController().signal });
+        assert.strictEqual(run.status, 'failed');
+        assert.ok(/declined step "s1"/.test(run.error ?? ''), `unexpected error: ${run.error}`);
+        assert.strictEqual(run.steps[1].status, 'skipped', 'a later step ran after the user declined');
+        assert.ok(!host.calls.includes('tool:echo'));
+    });
+
+    test('a decline inside a loop stops the remaining iterations', async () => {
+        host = declineHost();
+        const def: HarnessDefinition = {
+            id: 'h', name: 'H', source: 'built-in',
+            steps: [{
+                id: 'loop', name: 'Loop', type: 'foreach', items: 'a\nb\nc', onError: 'continue',
+                steps: [{ id: 'inner', name: 'Ask', type: 'tool', pluginId: 'needs-approval', args: {}, onError: 'continue' }]
+            }]
+        };
+        const run = await runHarness(def, host, { input: '', signal: new AbortController().signal });
+        assert.strictEqual(host.calls.filter(c => c === 'tool:needs-approval').length, 1, 'the loop kept going after a decline');
+        assert.strictEqual(run.status, 'failed');
+    });
+
+    test('an ordinary failure still follows its retry and continue policy', async () => {
+        host = makeHost();
+        const def: HarnessDefinition = {
+            id: 'h', name: 'H', source: 'built-in',
+            steps: [
+                { id: 's1', name: 'Boom', type: 'tool', pluginId: 'boom', args: {}, onError: 'retry-then-continue', retries: 1 },
+                { id: 's2', name: 'After', type: 'tool', pluginId: 'echo', args: {} }
+            ]
+        };
+        const run = await runHarness(def, host, { input: '', signal: new AbortController().signal });
+        assert.strictEqual(run.steps[0].attempts, 2, 'retry policy stopped applying to real failures');
+        assert.strictEqual(run.steps[1].status, 'done');
+    });
+});
+
+suite('harnessEngine — the tool gate', () => {
+    const def: HarnessDefinition = {
+        id: 'g', name: 'G', version: '1.0.0', source: 'user',
+        steps: [{ id: 'cmd', name: 'cmd', type: 'tool', pluginId: 'run-command', args: { command: 'echo hi' }, timeoutMs: 40 }]
+    };
+
+    test('time spent in the gate is not charged to the step timeout', async () => {
+        const host = makeHost({
+            gateTool: () => new Promise(resolve => setTimeout(() => resolve(null), 120)),
+            runTool: async () => 'hi'
+        });
+        const run = await runHarness(def, host, { input: '', signal: new AbortController().signal });
+        assert.strictEqual(run.status, 'done', run.error);
+        assert.strictEqual(run.steps[0].output, 'hi');
+    });
+
+    test('a gate verdict becomes the step result; a decline is terminal', async () => {
+        let executed = 0;
+        const host = makeHost({ gateTool: async () => 'DECLINED: the user did not approve this step.', runTool: async () => { executed++; return 'ran'; } });
+        const withRetry: HarnessDefinition = { ...def, steps: [{ ...def.steps[0], onError: 'retry-then-continue', retries: 2 }] };
+        const run = await runHarness(withRetry, host, { input: '', signal: new AbortController().signal });
+        assert.strictEqual(executed, 0, 'the tool never runs after a decline');
+        assert.strictEqual(run.steps[0].attempts, 1, 'a decline is not retried');
+        assert.notStrictEqual(run.status, 'done');
+    });
+
+    test('a slow tool still times out once the gate has passed', async () => {
+        const host = makeHost({ gateTool: async () => null, runTool: () => new Promise(resolve => setTimeout(() => resolve('late'), 200)) });
+        const run = await runHarness(def, host, { input: '', signal: new AbortController().signal });
+        assert.strictEqual(run.steps[0].status, 'failed');
+        assert.ok(/timed out/.test(run.steps[0].error ?? ''), run.steps[0].error);
     });
 });

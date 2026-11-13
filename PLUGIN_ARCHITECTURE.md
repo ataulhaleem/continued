@@ -127,7 +127,7 @@ mkdir -p .continued/plugins
 
 ### Step 2: Write Your Plugin
 
-Create `.continued/plugins/myPlugin.ts`:
+Create `.continued/plugins/myPlugin.js`:
 
 ```typescript
 import { ITool } from '../../src/plugins/types';
@@ -189,7 +189,7 @@ export const myCustomTool: ITool = {
 ## Example: Code Review Tool
 
 ```typescript
-// .continued/plugins/codeReviewTool.ts
+// .continued/plugins/codeReviewTool.js
 import { ITool } from '../../src/plugins/types';
 import * as vscode from 'vscode';
 

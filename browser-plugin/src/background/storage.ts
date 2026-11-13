@@ -5,7 +5,7 @@
  */
 
 import { ChatMessage } from '../core/llmClient';
-import { HarnessDefinition } from '../core/harness/types';
+import { HarnessDefinition } from '../../../core/harness/types';
 
 // Firefox exposes the promise-based `browser.*`; Chrome's `chrome.*` is promise-capable in MV3.
 export const ext: typeof chrome = (globalThis as unknown as { browser?: typeof chrome }).browser ?? chrome;
@@ -20,6 +20,8 @@ export interface Settings {
     maxContextChars: number;
     /** Allow the agent to open/fetch localhost and private-network URLs. */
     allowPrivateNetwork: boolean;
+    /** Let read-page read `file://` tabs the user opened. The browser must also grant file access. */
+    allowLocalFiles: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -27,10 +29,11 @@ export const DEFAULT_SETTINGS: Settings = {
     keys: { openai: '', gemini: '', anthropic: '', blablador: '' },
     lastModel: '',
     lastMode: 'agent',
-    maxIterations: 20,
-    modelTimeoutMs: 120000,
+    maxIterations: 60,
+    modelTimeoutMs: 600000,
     maxContextChars: 60000,
-    allowPrivateNetwork: false
+    allowPrivateNetwork: false,
+    allowLocalFiles: false
 };
 
 export interface ChatSession {
